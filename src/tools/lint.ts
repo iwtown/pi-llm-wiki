@@ -2,10 +2,11 @@
  * pi-llm-wiki — obs-lint tool.
  * Health check for the LLM-Wiki knowledge base.
  * Checks: orphan nodes, stale content, contradictions, broken links.
+ * With fix=true, auto-marks stale pages with status: stale in frontmatter.
  */
 
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { listDir, readFile } from "../client";
+import { listDir, readFile, writeFile } from "../client";
 import { PATHS, STALE_DAYS } from "../config";
 
 export interface LintIssue {
@@ -23,9 +24,30 @@ export interface LintResult {
     warnings: number;
     info: number;
   };
+  /** Paths that were auto-fixed (only when fix=true) */
+  fixed?: string[];
 }
 
-export async function lint(ctx: ExtensionContext): Promise<LintResult> {
+/** Add status: stale to frontmatter of a markdown file */
+function markStale(content: string): string {
+  const fmMatch = content.match(/^---\n([\s\S]*?)\n---/);
+  if (!fmMatch) return content;
+  const fm = fmMatch[1];
+  // Already has status field
+  if (/^status:\s*/m.test(fm)) {
+    return content.replace(/^status:\s*.*$/m, "status: stale");
+  }
+  // Insert status after tags line, or before closing ---
+  const updated = fm.includes("tags:")
+    ? fm.replace(/^(tags:.*)$/m, "$1\nstatus: stale")
+    : fm + "\nstatus: stale";
+  return `---\n${updated}\n---${content.slice(fmMatch[0].length)}`;
+}
+
+export async function lint(
+  ctx: ExtensionContext,
+  params: { fix?: boolean } = {}
+): Promise<LintResult> {
   const issues: LintIssue[] = [];
 
   // Collect all wiki pages
@@ -151,6 +173,25 @@ export async function lint(ctx: ExtensionContext): Promise<LintResult> {
     }
   }
 
+  // Auto-fix: mark stale pages
+  const fixed: string[] = [];
+  if (params.fix) {
+    const staleIssues = issues.filter((i) => i.type === "stale");
+    for (const issue of staleIssues) {
+      try {
+        const content = allContents.get(issue.path);
+        if (!content) continue;
+        const updated = markStale(content);
+        if (updated !== content) {
+          await writeFile(issue.path, updated);
+          fixed.push(issue.path);
+        }
+      } catch {
+        // skip unmodifiable files
+      }
+    }
+  }
+
   const errors = issues.filter((i) => i.severity === "error").length;
   const warnings = issues.filter((i) => i.severity === "warning").length;
   const info = issues.filter((i) => i.severity === "info").length;
@@ -158,5 +199,6 @@ export async function lint(ctx: ExtensionContext): Promise<LintResult> {
   return {
     issues,
     summary: { total: issues.length, errors, warnings, info },
+    ...(fixed.length > 0 ? { fixed } : {}),
   };
 }

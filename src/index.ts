@@ -75,9 +75,12 @@ export default function (pi: ExtensionAPI) {
       limit: Type.Optional(
         Type.Number({ description: "Max results (default: 3)." })
       ),
+      depth: Type.Optional(
+        Type.String({ description: "Search depth: 'brief' (titles only), 'normal' (snippets), 'full' (page content). Default: 'normal'." })
+      ),
     }),
     async execute(toolCallId, params, _signal, _onUpdate, ctx) {
-      const results = await query(params.query, { scope: params.scope, limit: params.limit }, ctx);
+      const results = await query(params.query, { scope: params.scope, limit: params.limit, depth: params.depth as "brief" | "normal" | "full" | undefined }, ctx);
       if (results.length === 0) {
         return {
           content: [{ type: "text", text: "📭 LLM-Wiki 中未找到匹配结果。" }],
@@ -87,7 +90,7 @@ export default function (pi: ExtensionAPI) {
       const text = results
         .map(
           (r, i) =>
-            `${i + 1}. **${r.title}** (${r.path}, score: ${r.score.toFixed(2)})\n   ${r.snippet.slice(0, 150)}${r.tags?.length ? `\n   🏷️ ${r.tags.join(", ")}` : ""}`
+            `${i + 1}. **${r.title}** (${r.path}${r.source ? `, ${r.source}` : ""}, score: ${r.score.toFixed(2)})\n   ${r.snippet.slice(0, 150)}${r.tags?.length ? `\n   🏷️ ${r.tags.join(", ")}` : ""}`
         )
         .join("\n\n");
       return {
@@ -128,12 +131,16 @@ export default function (pi: ExtensionAPI) {
         };
       }
       const linkedList = result.linkedTo.map((l) => `  - [[${l}]]`).join("\n");
+      const insightsLine =
+        result.insights.length > 0
+          ? `💡 提取到 ${result.insights.length} 条洞察:\n${result.insights.map((s) => `  - ${s}`).join("\n")}\n\n`
+          : "";
       return {
         content: [
           {
             type: "text",
             text:
-              `✅ 编译完成\n> ${result.rawPath} → ${result.wikiPath}\n> 类型: ${result.wikiType}\n\n🔗 需织入的页面:\n${linkedList || "  无"}\n\n⚠️ 请立即执行 obs-weave 更新关联页面。`,
+              `✅ 编译完成\n> ${result.rawPath} → ${result.wikiPath}\n> 类型: ${result.wikiType}\n\n${insightsLine}🔗 需织入的页面:\n${linkedList || "  无"}\n\n⚠️ 请立即执行 obs-weave 更新关联页面。`,
           },
         ],
         details: result,
@@ -195,10 +202,15 @@ export default function (pi: ExtensionAPI) {
     label: "obs-lint: Knowledge Base Health Check",
     description:
       "Run a health check on the LLM-Wiki: detect orphan nodes, stale content, broken links, missing frontmatter. " +
+      "Set fix=true to auto-mark stale pages with status: stale. " +
       "Triggers: after compile+weave, or user says 检查, lint, 健康检查.",
-    parameters: Type.Object({}),
-    async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
-      const result = await lint(ctx);
+    parameters: Type.Object({
+      fix: Type.Optional(
+        Type.Boolean({ description: "Auto-mark stale pages with status: stale in frontmatter. Default: false." })
+      ),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const result = await lint(ctx, { fix: params.fix });
       const summary = [
         `📊 LLM-Wiki 健康检查`,
         ``,
@@ -218,6 +230,11 @@ export default function (pi: ExtensionAPI) {
         };
       }
 
+      const fixSection =
+        result.fixed && result.fixed.length > 0
+          ? `\n🔧 已自动修复 ${result.fixed.length} 个过期页面（标记 status: stale）:\n${result.fixed.map((p) => `  - ${p}`).join("\n")}\n`
+          : "";
+
       const issueList = result.issues
         .slice(0, 10)
         .map((i) => {
@@ -227,7 +244,7 @@ export default function (pi: ExtensionAPI) {
         .join("\n");
 
       return {
-        content: [{ type: "text", text: `${summary}\n${issueList}${result.issues.length > 10 ? `\n\n... 还有 ${result.issues.length - 10} 个问题` : ""}` }],
+        content: [{ type: "text", text: `${summary}\n${fixSection}${issueList}${result.issues.length > 10 ? `\n\n... 还有 ${result.issues.length - 10} 个问题` : ""}` }],
         details: result,
       };
     },

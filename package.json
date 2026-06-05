@@ -18,7 +18,9 @@
     "node": ">=18"
   },
   "pi": {
-    "extensions": ["src/index.ts"]
+    "extensions": [
+      "src/index.ts"
+    ]
   },
   "devDependencies": {
     "typescript": "^6.0.3"
