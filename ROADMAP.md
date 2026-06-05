@@ -1,105 +1,156 @@
-# pi-llm-wiki 开发与改进计划
+# pi-llm-wiki 开发计划书
 
-> 目标：完整实现 schema.md 定义的 LLM-Wiki 工作流，达到原 `obsidian-knowledge.ts` 的功能完整度。
-> 当前 `v1.0.0` 已实现核心 7 工具 + 2 hooks，TypeScript strict 零错误，全局安装就绪。
+> 版本：`v1.0.0` → 持续优化  
+> 安装：`~/pi-llm-wiki/`，全局 local package，`pi install` 注册  
+> 依赖：Obsidian Local REST API (`localhost:27126`) + `pi-observational-memory`
 
-## 当前状态
+---
 
-### ✅ 已实现
+## 一、当前版本确认（v1.0.0）
 
-| 组件 | 功能 | 状态 |
+### 安装验证
+
+| 检查项 | 状态 |
+|--------|------|
+| 全局注册 (`~/.pi/agent/settings.json`) | ✅ `"../../pi-llm-wiki"` |
+| `package.json` 符合 Pi 规范 (`pi.extensions`) | ✅ |
+| TypeScript strict 编译 | ✅ 零错误 |
+| 14 个源文件完整 | ✅ |
+| Git 版本管理 (7 commits) | ✅ |
+
+### 7 工具全部可用
+
+| 工具 | 验证 | 备注 |
 |------|------|------|
-| `obs_ingest` | 会话复盘 → raw/sessions/ + log.md | ✅ |
-| `obs_query` | 全文搜索 + frontmatter 富化 | ✅ |
-| `obs_compile` | raw → wiki 编译 + 双链 | ✅ |
-| `obs_weave` | 编译后织入已有页面 | ✅ |
-| `obs_lint` | 孤立/过期/断裂链接检测 | ✅ |
-| `obs_capture` | 查询洞察回流 wiki | ✅ |
-| `obs_reference` | 跨库引用卡片 | ✅ |
-| `before_start` | schema.md 注入 system prompt | ✅ |
-| `agent_end` | 自动兜底复盘 | ✅ |
-| `client.ts` | Obsidian REST API CRUD | ✅ |
-| `manifest.ts` | session 编译/织入状态追踪 | ✅ |
-| `project.ts` | 从 cwd 检测项目名 | ✅ |
+| `obs_ingest` | ✅ | 格式正确：title/project/session_id/compiled 全字段 |
+| `obs_query` | ✅ | 全文搜索 + frontmatter 富化 |
+| `obs_compile` | ✅ | raw → wiki + 双链 + markCompiled |
+| `obs_weave` | ✅ | 回链 + 经验日志追加 |
+| `obs_lint` | ✅ | 孤立/过期/断裂链接检测 |
+| `obs_capture` | ✅ | 洞察回流 |
+| `obs_reference` | ✅ | 跨库引用卡片 |
 
-### ❌ 缺失功能 vs schema.md
+### 2 Hooks 工作正常
 
-| 规则 | 需求 | 当前状态 |
+| Hook | 验证 | 备注 |
+|------|------|------|
+| `before_agent_start` | ✅ | schema.md 注入 system prompt，5min 缓存 |
+| `agent_end` | ✅ | 去重（markIngested）+ 读取 observational-memory 生成有内容复盘 |
+
+### 已修复的关键问题（本次会话）
+
+| 问题 | 修复 | Commit |
+|------|------|--------|
+| API key 硬编码 | 环境变量 `OBSIDIAN_LLM_WIKI_KEY` + 单次警告 | `1832d42` |
+| `detectProject` 只取 basename (pi vs Pi-Agent) | 读 AGENTS.md `#` 标题 | `a23e110` |
+| `agent_end` 每次创建空壳 | markIngested 去重 | `8d12438` |
+| `agent_end` 无内容空壳 | 集成 pi-observational-memory 提取 observations | `c18f7be` |
+| `package.json` 非规范字段 | `pi.extensions` 替代自定义字段 | `fd35dd7` |
+| 断链检测死逻辑 (lint.ts) | 修复匹配逻辑 | 审计修复 |
+| YAML frontmatter 转义缺失 | `quoteYaml()` 函数 | 审计修复 |
+| 多处未使用导入 | 清理 | 审计修复 |
+
+---
+
+## 二、与 pi-observational-memory 的协作
+
+```
+pi-observational-memory              pi-llm-wiki
+─────────────────────────           ──────────────────────
+compaction → observations      →    agent_end 读取 observations
+           → reflections       →    生成有内容的自动复盘
+                               
+recall tool                     →    obs_ingest (LLM 手动调用)
+                                →    obs_compile (≥5 raw)
+                                →    obs_weave → obs_lint
+```
+
+**关键**：两个扩展通过 session entries 协作——observational-memory 写入 `om.observations.recorded`，agent-end 读取这些条目生成复盘。不会再有空壳。
+
+---
+
+## 三、待优化清单（按优先级）
+
+### P0 — 数据完整性（下次使用前）
+
+| # | 任务 | 原因 |
+|---|------|------|
+| P0.1 | 设置 `OBSIDIAN_LLM_WIKI_KEY` 环境变量 | 消除控制台警告 |
+| P0.2 | agent_end 复盘需记录当前 session 的 cwd/项目 | 目前 project detection 依赖 ctx.cwd |
+
+### P1 — 工作流闭环（本周）
+
+| # | 任务 | 对应 schema 规则 |
+|---|------|-----------------|
+| P1.1 | `obs_weave` 自动更新 `wiki/图谱.md` | 规则 6 |
+| P1.2 | `obs_compile` 显示提取的 insights 数量 | 规则 3.5 (编译前确认) |
+| P1.3 | `obs_lint` 自动标记 stale（更新 frontmatter） | 规则 5 |
+| P1.4 | `obs_query` 多级检索：图谱 → grep → REST API | §8 |
+
+### P2 — 知识进化（两周内）
+
+| # | 任务 | 对应 schema 规则 |
+|---|------|-----------------|
+| P2.1 | `obs_compile` 知识升级检测（2+ 项目 → 全局） | §7.2 |
+| P2.2 | `obs_lint` 矛盾检测（同一主题多版本） | §7.2 |
+| P2.3 | `obs_lint` 重复内容检测 | §7.2 |
+| P2.4 | `obs_query` 深度控制（brief/normal/full） | §8 |
+
+### P3 — 长期维护（月度）
+
+| # | 任务 |
+|---|------|
+| P3.1 | 新工具 `obs_aggregate`：季度精华 → `wiki/记忆/YYYY/Qn.md` |
+| P3.2 | 新工具 `obs_distill`：读经验日志 → 重写摘要 → 清空 |
+| P3.3 | 系统页面自动更新（仪表盘统计） |
+| P3.4 | REST API 不可用时的文件系统直写降级 |
+
+---
+
+## 四、测试与验证策略
+
+| 频率 | 测试 | 验收标准 |
 |------|------|----------|
-| 规则 3.5 | compile 前向用户展示关键发现并确认重点 | ❌ 未实现 |
-| 规则 4 | compile 后返回 `linkedTo` 并**强制**提示 weave | ⚠️ 返回了 linkedTo 但未强制 |
-| 规则 6 | compile 后自动更新 `wiki/图谱.md` | ❌ 未实现 |
-| 规则 7 | 经验日志追加 + 月度蒸馏 | ⚠️ weave 做了日志追加，无蒸馏 |
-| §7.2 | 知识升级：2+ 项目出现 → 升级为全局 | ❌ 未实现 |
-| §7.2 | compile 时查重（同类洞察验证 N 次） | ❌ 未实现 |
-| §7.2 | compile 时矛盾检测（与历史决策冲突） | ❌ 未实现 |
-| §7.2 | agent 自检清单自动执行 | ❌ 未实现 |
-| §8 | obs_query 多级检索策略（图谱 → grep → 搜索） | ⚠️ 只实现了全文搜索 |
-| §8 | obs_query 深度控制（brief/normal/full） | ❌ 未实现 |
-| §5 | 90 天 stale 自动标记 | ⚠️ lint 检测但不标记 |
-| 季度聚合 | `obs_aggregate` 季度精华提取 | ❌ 未实现 |
-| 仪表盘 | 系统页面自动更新（统计/计数） | ❌ 未实现 |
-| agent_end | 智能判断：跳过已 ingest 的 session | ⚠️ 每次都创建 |
-| Git | LLM-Wiki 自动提交触发 | ❌ 未实现（obsidian-git 独立运行） |
+| **每次会话** | agent_end 是否产生空壳？ | 0 空壳 |
+| **每次会话** | obs_ingest 格式是否完整？ | title/project/session_id/compiled 全字段 |
+| **每周** | 未编译 raw ≥5 时触发 compile → weave → lint | 全链无错误 |
+| **每周** | lint 报告 0 error | error=0, warning 递减 |
+| **每月** | 图谱.md 是否最新 | 含本月所有新页面 |
+| **按需** | tsc strict 编译 | 零错误 |
 
-## 分阶段计划
+---
 
-### Phase 1: 工作流完整性（本周）
+## 五、目录结构
 
-确保核心流水线（ingest → compile → weave → lint）闭环。
+```
+~/pi-llm-wiki/
+├── package.json          # Pi package manifest (pi.extensions)
+├── ROADMAP.md            # 本文件
+├── .gitignore
+└── src/
+    ├── index.ts          # 入口：注册 7 tools + 2 hooks
+    ├── config.ts         # Vault 路径、API key、阈值
+    ├── client.ts         # Obsidian REST API 封装
+    ├── manifest.ts       # 编译/织入/linted 状态追踪
+    ├── project.ts        # 项目检测（AGENTS.md 标题）
+    ├── hooks/
+    │   ├── before-start.ts   # schema.md 注入 system prompt
+    │   └── agent-end.ts      # 智能兜底 + observational-memory 集成
+    └── tools/
+        ├── ingest.ts     # obs_ingest
+        ├── query.ts      # obs_query
+        ├── compile.ts    # obs_compile
+        ├── weave.ts      # obs_weave
+        ├── lint.ts       # obs_lint
+        ├── capture.ts    # obs_capture
+        └── reference.ts  # obs_reference
+```
 
-| # | 任务 | 改动 |
-|---|------|------|
-| 1.1 | `obs_compile` 返回更多元数据（insights 提取增强） | compile.ts |
-| 1.2 | `obs_weave` 更新 `wiki/图谱.md`（规则 6） | weave.ts + 新函数 |
-| 1.3 | `agent_end` 智能跳过：检测本 session 是否已调用 obs_ingest | agent-end.ts |
-| 1.4 | 编译前确认机制：工具返回 mustConfirm=true 时 LLM 应暂停 | compile.ts + index.ts |
+---
 
-### Phase 2: 质量增强（下周）
+## 六、环境变量
 
-让知识库自我进化，而非被动积累。
-
-| # | 任务 | 改动 |
-|---|------|------|
-| 2.1 | `obs_lint` 增加矛盾检测（同一主题多版本标记冲突） | lint.ts |
-| 2.2 | `obs_lint` 增加重复内容检测 | lint.ts |
-| 2.3 | `obs_lint` 自动标记 stale（更新 frontmatter `status: stale`） | lint.ts |
-| 2.4 | `obs_query` 实现多级策略：先读图谱 → 再 grep → 最后全文搜索 | query.ts |
-
-### Phase 3: 知识升级（两周内）
-
-实现 Karpathy 模式的完整知识生命周期。
-
-| # | 任务 | 改动 |
-|---|------|------|
-| 3.1 | `obs_compile` 知识升级检测：同一洞察 ≥2 项目 → 提示升级全局 | compile.ts |
-| 3.2 | 新工具 `obs_aggregate`：季度精华提取到 `wiki/记忆/YYYY/Qn.md` | 新文件 |
-| 3.3 | 新工具 `obs_distill`：月度蒸馏 — 读经验日志 → 重写摘要 → 清空日志 | 新文件 |
-| 3.4 | 系统页面自动更新（仪表盘统计、hot.md 热点） | 新文件 tools/system.ts |
-
-### Phase 4: 健壮性（持续）
-
-| # | 任务 | 改动 |
-|---|------|------|
-| 4.1 | REST API 不可用时的完整降级策略（文件系统直写） | client.ts |
-| 4.2 | 并发写入保护（同一 vault 文件的锁） | client.ts |
-| 4.3 | 错误恢复：ingest/compile 失败后的重试 | 各工具 |
-| 4.4 | 性能：批量操作优化（读多个文件时合并请求） | client.ts |
-
-## 测试策略
-
-| 阶段 | 测试内容 | 频率 |
-|------|----------|------|
-| 日常使用 | 每次会话结束触发 ingest → 检查 raw/sessions/ 产出 | 每次 |
-| Phase 1 完成 | 手动触发 compile → weave → lint 完整流程 | 一次性 |
-| 积累 ≥5 篇 | 触发批量 compile 流程 | 按需 |
-| Phase 2+3 | 每次 lint 对比输出，确认新检测项生效 | 每日 |
-| 月底 | 运行 obs_aggregate 验证季度精华 | 每月 |
-
-## 成功标准
-
-- [ ] 5 次连续会话 → ingest → compile → weave → lint 流程无人工干预完成
-- [ ] 图谱.md 每次 compile 后自动更新
-- [ ] lint 报告覆盖所有 4 种检测类型（孤立/过期/矛盾/重复）
-- [ ] 知识升级：至少 1 次从项目级升级为全局级的自动建议
-- [ ] 0 次因 package 错误导致的数据丢失
+```bash
+# 推荐加到 ~/.bashrc
+export OBSIDIAN_LLM_WIKI_KEY="5b484f2a70fb254383feaed8fe92604841f5fd2eda221e1fa8ec0e50839b1a9e"
+```
