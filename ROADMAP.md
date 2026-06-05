@@ -1,12 +1,12 @@
 # pi-llm-wiki 开发计划书
 
-> 版本：`v1.0.0` → 持续优化  
+> 版本：`v1.0.0` → `v1.1.0-dev`（Phase 1 ✅，监控迁移待做）  
 > 安装：`~/pi-llm-wiki/`，全局 local package，`pi install` 注册  
 > 依赖：Obsidian Local REST API (`localhost:27126`) + `pi-observational-memory`
 
 ---
 
-## 一、当前版本确认（v1.0.0）
+## 一、当前版本确认（v1.1.0-dev）
 
 ### 安装验证
 
@@ -16,7 +16,8 @@
 | `package.json` 符合 Pi 规范 (`pi.extensions`) | ✅ |
 | TypeScript strict 编译 | ✅ 零错误 |
 | 14 个源文件完整 | ✅ |
-| Git 版本管理 (7 commits) | ✅ |
+| Git 版本管理 (9 commits) | ✅ |
+| 系统监控页面自动生成 | ❌ 未迁移 | 见 §三 |
 
 ### 7 工具全部可用
 
@@ -69,14 +70,69 @@ recall tool                     →    obs_ingest (LLM 手动调用)
 
 ---
 
-## 三、待优化清单（按优先级）
+## 三、⚠️ 已知断层：监控系统未迁移
 
-### P0 — 数据完整性（下次使用前）
+> **这是当前最大的功能缺口。**
 
-| # | 任务 | 原因 |
+旧 `obsidian-knowledge.ts`（195KB 单文件）负责两件事：
+1. 7 个知识管理工具 + 2 个 hook
+2. 3 个系统监控页面的自动生成
+
+重写为 pi-llm-wiki 时，只迁移了第 1 部分（工具+hook），第 2 部分（监控页面生成）**未迁移**。
+
+### 三个监控页面的状态
+
+| 页面 | 旧代码实现 | 新 package 状态 | 当前实际 |
+|------|----------|---------------|---------|
+| `wiki/仪表盘.md` | `generateDashboard()` | ❌ 未迁移 | 显示过时数据（旧代码最后一次生成的结果） |
+| `wiki/流程巡检.md` | `generateFlowAudit()` | ❌ 未迁移 | 空壳——只显示"五阶段管线全通"，无数据支撑 |
+| `wiki/问题追踪.md` | `generateIssueTracker()` | ❌ 未迁移 | 过时数据 + 混入了非管线内容 |
+
+### 为什么这是 P0 而非 P3
+
+- 没有监控页面 = 人对系统**完全失明**
+- 编译率下降、空壳率回升、幽灵条目重现——都不会被发现
+- 仪表盘原来每 15 分钟自动刷新，现在停在最后一次旧代码生成的状态
+- 这是生产系统的基础设施，不是"锦上添花"
+
+### 迁移需要的能力
+
+新 package 已有以下数据源，可以直接复用：
+
+| 数据 | 来源 | 可生成 |
+|------|------|--------|
+| 编译率、织入率 | `manifest.ts` → `getUncompiledSessions()` | 仪表盘统计 |
+| 待编译列表 | `manifest.ts` → frontmatter scan | 问题追踪 |
+| 孤立/过期/断链 | `lint.ts` → `lint()` | 流程巡检 C4 |
+| ingest 时间线 | `log.md` → grep `^## \[` | 仪表盘最近操作 |
+| 项目分布 | `raw/sessions/` 目录结构 | 仪表盘项目统计 |
+| 空壳检测 | frontmatter scan (`auto_generated: "true"`) | 流程巡检 C1 |
+| 图谱覆盖率 | `wiki/图谱.md` wikilink 解析 vs wiki/ 文件列表 | 流程巡检 |
+| 健康评分 | 加权公式（已在 工作流监控与改进.md 定义） | 仪表盘 |
+
+需要新建：`src/system/` 目录，包含 `dashboard.ts`, `audit.ts`, `tracker.ts` 三个生成器。
+
+### 过渡方案（迁移完成前）
+
+| 监控需求 | 临时替代 |
+|---------|---------|
+| 知道有多少待编译 | 每次启动后跑 `obs_lint`，或看 `问题追踪.md`（过时但仍有参考）|
+| 知道 wiki 是否健康 | 手动跑 `obs_lint` |
+| 完整管线健康 | 无替代——这是迁移的根本原因 |
+
+---
+
+## 四、优先级排序的改进计划
+
+### P0 — 监控系统迁移（本阶段）
+
+| # | 任务 | 产出 |
 |---|------|------|
-| P0.1 | 设置 `OBSIDIAN_LLM_WIKI_KEY` 环境变量 | 消除控制台警告 |
-| P0.2 | agent_end 复盘需记录当前 session 的 cwd/项目 | 目前 project detection 依赖 ctx.cwd |
+| P0.1 | `src/system/dashboard.ts` — 仪表盘生成器 | `wiki/仪表盘.md` 自动刷新：编译率、健康评分、项目分布、最近操作 |
+| P0.2 | `src/system/audit.ts` — 流程巡检生成器 | `wiki/流程巡检.md` 自动刷新：5 阶段检查（C1-C5）、环比退化、警报分级 |
+| P0.3 | `src/system/tracker.ts` — 问题追踪生成器 | `wiki/问题追踪.md` 自动刷新：待编译队列、最近关闭、只追踪管线 |
+| P0.4 | 注册到 `before_agent_start` hook | 每次会话启动自动刷新三个页面 |
+| P0.5 | 环境变量已设置 (`OBSIDIAN_LLM_WIKI_KEY`) | ✅ 已完成 — `~/.profile` + `~/.bashrc` |
 
 ### P1 — 工作流闭环（✅ 已完成 — commit `4121112`）
 
@@ -102,12 +158,11 @@ recall tool                     →    obs_ingest (LLM 手动调用)
 |---|------|
 | P3.1 | 新工具 `obs_aggregate`：季度精华 → `wiki/记忆/YYYY/Qn.md` |
 | P3.2 | 新工具 `obs_distill`：读经验日志 → 重写摘要 → 清空 |
-| P3.3 | 系统页面自动更新（仪表盘统计） |
-| P3.4 | REST API 不可用时的文件系统直写降级 |
+| P3.3 | REST API 不可用时的文件系统直写降级 |
 
 ---
 
-## 四、测试与验证策略
+## 五、测试与验证策略
 
 | 频率 | 测试 | 验收标准 |
 |------|------|----------|
@@ -120,7 +175,7 @@ recall tool                     →    obs_ingest (LLM 手动调用)
 
 ---
 
-## 五、目录结构
+## 六、目录结构
 
 ```
 ~/pi-llm-wiki/
@@ -136,19 +191,23 @@ recall tool                     →    obs_ingest (LLM 手动调用)
     ├── hooks/
     │   ├── before-start.ts   # schema.md 注入 system prompt
     │   └── agent-end.ts      # 智能兜底 + observational-memory 集成
-    └── tools/
-        ├── ingest.ts     # obs_ingest
-        ├── query.ts      # obs_query
-        ├── compile.ts    # obs_compile
-        ├── weave.ts      # obs_weave
-        ├── lint.ts       # obs_lint
-        ├── capture.ts    # obs_capture
-        └── reference.ts  # obs_reference
+    ├── tools/
+    │   ├── ingest.ts     # obs_ingest
+    │   ├── query.ts      # obs_query
+    │   ├── compile.ts    # obs_compile
+    │   ├── weave.ts      # obs_weave
+    │   ├── lint.ts       # obs_lint
+    │   ├── capture.ts    # obs_capture
+    │   └── reference.ts  # obs_reference
+    └── system/           # ⏳ P0 — 监控页面生成（待实现）
+        ├── dashboard.ts  # 仪表盘生成器
+        ├── audit.ts      # 流程巡检生成器
+        └── tracker.ts    # 问题追踪生成器
 ```
 
 ---
 
-## 六、环境变量
+## 七、环境变量
 
 ```bash
 # 推荐加到 ~/.bashrc
