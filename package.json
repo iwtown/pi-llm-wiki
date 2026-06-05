@@ -3,13 +3,13 @@
   "version": "1.0.0",
   "description": "Pi Agent LLM-Wiki knowledge management package. Provides 7 tools (ingest, query, compile, weave, lint, capture, reference) plus lifecycle hooks for Obsidian-based agent long-term memory.",
   "keywords": [
+    "pi-package",
     "pi-agent",
     "extension",
     "obsidian",
     "llm-wiki",
     "knowledge-management"
   ],
-  "main": "src/index.ts",
   "dependencies": {
     "@earendil-works/pi-coding-agent": ">=0.78.0",
     "typebox": "*"
@@ -18,20 +18,7 @@
     "node": ">=18"
   },
   "pi": {
-    "type": "extension",
-    "tools": [
-      "obs-ingest",
-      "obs-query",
-      "obs-compile",
-      "obs-weave",
-      "obs-lint",
-      "obs-capture",
-      "obs-reference"
-    ],
-    "hooks": [
-      "before_agent_start",
-      "agent_end"
-    ]
+    "extensions": ["src/index.ts"]
   },
   "devDependencies": {
     "typescript": "^6.0.3"
