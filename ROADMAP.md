@@ -78,14 +78,14 @@ recall tool                     →    obs_ingest (LLM 手动调用)
 | P0.1 | 设置 `OBSIDIAN_LLM_WIKI_KEY` 环境变量 | 消除控制台警告 |
 | P0.2 | agent_end 复盘需记录当前 session 的 cwd/项目 | 目前 project detection 依赖 ctx.cwd |
 
-### P1 — 工作流闭环（本周）
+### P1 — 工作流闭环（✅ 已完成 — commit `4121112`）
 
-| # | 任务 | 对应 schema 规则 |
-|---|------|-----------------|
-| P1.1 | `obs_weave` 自动更新 `wiki/图谱.md` | 规则 6 |
-| P1.2 | `obs_compile` 显示提取的 insights 数量 | 规则 3.5 (编译前确认) |
-| P1.3 | `obs_lint` 自动标记 stale（更新 frontmatter） | 规则 5 |
-| P1.4 | `obs_query` 多级检索：图谱 → grep → REST API | §8 |
+| # | 任务 | 对应 schema 规则 | 状态 |
+|---|------|-----------------|------|
+| P1.1 | `obs_weave` 自动更新 `wiki/图谱.md` | 规则 6 | ✅ 已实现 |
+| P1.2 | `obs_compile` 显示提取的 insights 数量和内容 | 规则 3.5 (编译前确认) | ✅ 已实现 |
+| P1.3 | `obs_lint` 自动标记 stale（`fix=true` 更新 frontmatter） | 规则 5 | ✅ 已实现 |
+| P1.4 | `obs_query` 多级检索：图谱 → REST API | §8 | ✅ 已实现 |
 
 ### P2 — 知识进化（两周内）
 
@@ -94,7 +94,7 @@ recall tool                     →    obs_ingest (LLM 手动调用)
 | P2.1 | `obs_compile` 知识升级检测（2+ 项目 → 全局） | §7.2 |
 | P2.2 | `obs_lint` 矛盾检测（同一主题多版本） | §7.2 |
 | P2.3 | `obs_lint` 重复内容检测 | §7.2 |
-| P2.4 | `obs_query` 深度控制（brief/normal/full） | §8 |
+| P2.4 | `obs_query` 深度控制实现（brief/normal/full） | §8 | ✅ 已实现（参数已添加） |
 
 ### P3 — 长期维护（月度）
 
