@@ -18,10 +18,12 @@ export function detectProject(cwd: string): ProjectInfo | null {
   const home = process.env.HOME || "/home";
 
   while (dir !== "/" && dir.startsWith(home)) {
-    // Check AGENTS.md first (Pi-specific)
+    // Check AGENTS.md first (Pi-specific) — extract project name from title
     const agentsPath = path.join(dir, "AGENTS.md");
     if (fs.existsSync(agentsPath)) {
-      const name = path.basename(dir);
+      const content = fs.readFileSync(agentsPath, "utf-8");
+      const titleMatch = content.match(/^#\s+(.+)$/m);
+      const name = titleMatch?.[1]?.replace(/\s+/g, "-") ?? path.basename(dir);
       return { name, root: dir, source: "AGENTS.md" };
     }
 
