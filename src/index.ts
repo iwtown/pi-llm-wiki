@@ -10,7 +10,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 
 import { injectSchema } from "./hooks/before-start";
-import { autoIngest } from "./hooks/agent-end";
+import { autoIngest, markIngested } from "./hooks/agent-end";
 import { ingest } from "./tools/ingest";
 import { query } from "./tools/query";
 import { compile } from "./tools/compile";
@@ -45,6 +45,7 @@ export default function (pi: ExtensionAPI) {
     }),
     async execute(toolCallId, params, _signal, _onUpdate, ctx) {
       const result = await ingest(params.content, ctx);
+      markIngested(pi); // prevent agent_end from creating duplicate
       return {
         content: [
           {
