@@ -211,5 +211,5 @@ recall tool                     →    obs_ingest (LLM 手动调用)
 
 ```bash
 # 推荐加到 ~/.bashrc
-export OBSIDIAN_LLM_WIKI_KEY="5b484f2a70fb254383feaed8fe92604841f5fd2eda221e1fa8ec0e50839b1a9e"
+export OBSIDIAN_LLM_WIKI_KEY="your-obsidian-rest-api-key"
 ```

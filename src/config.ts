@@ -3,16 +3,15 @@
  */
 
 function getApiKey(): string {
-  const envKey = process.env.OBSIDIAN_LLM_WIKI_KEY;
-  if (envKey) return envKey;
-  // Fallback for dev — emit console warning once
-  if (!keyWarned) {
-    keyWarned = true;
-    console.warn("[pi-llm-wiki] OBSIDIAN_LLM_WIKI_KEY not set, using hardcoded fallback. Set this env var.");
+  const key = process.env.OBSIDIAN_LLM_WIKI_KEY;
+  if (!key) {
+    throw new Error(
+      "[pi-llm-wiki] OBSIDIAN_LLM_WIKI_KEY environment variable is required. " +
+      "Get your key from Obsidian REST API plugin settings."
+    );
   }
-  return "5b484f2a70fb254383feaed8fe92604841f5fd2eda221e1fa8ec0e50839b1a9e";
+  return key;
 }
-let keyWarned = false;
 
 export const LLM_WIKI = {
   /** Obsidian REST API endpoint (WSL2 mirrored networking) */
