@@ -87,7 +87,11 @@ export async function ingest(
 
   const template = buildTemplate(firstLine, projectName, date, sessionId, content);
 
-  const writeMode = await writeWithFallback(vaultPath, fsPath, template);
+  // Add Tasks-compatible checkbox in the raw session file
+  const taskLine = `- [ ] 编译: ${firstLine} 📅 ${date}`;
+  const templateWithTask = template + `\n${taskLine}\n`;
+
+  const writeMode = await writeWithFallback(vaultPath, fsPath, templateWithTask);
   if (writeMode === "fail") {
     throw new Error(`Failed to write session to both API and filesystem: ${vaultPath}`);
   }

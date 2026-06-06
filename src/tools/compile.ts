@@ -101,6 +101,20 @@ ${linkLines || "暂无关联"}
   // Mark raw session as compiled
   await markCompiled(rawPath);
 
+  // Mark task as done if raw session has Tasks checkbox
+  try {
+    const rawContent = await readFile(rawPath);
+    if (rawContent.includes("- [ ] 编译:")) {
+      const done = rawContent.replace(
+        /- \[ \] (编译:.*)/,
+        `- [x] $1 ✅ ${date}`
+      );
+      await writeFile(rawPath, done);
+    }
+  } catch {
+    // non-fatal
+  }
+
   // Update log
   try {
     await appendToFile(
