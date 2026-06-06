@@ -8,6 +8,7 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { listDir, readFile, writeFile } from "../client";
 import { PATHS, STALE_DAYS } from "../config";
+import { collectWikiPages, detectContradictions, detectDuplicates } from "../system/analyzer";
 
 export interface LintIssue {
   type: "orphan" | "stale" | "broken_link" | "missing_frontmatter" | "duplicate";
@@ -171,6 +172,29 @@ export async function lint(
         });
       }
     }
+  }
+
+  // P4.2: Contradiction detection — same topic in multiple categories
+  const allPagesArr = collectWikiPages();
+  const contradictions = detectContradictions(allPagesArr);
+  for (const c of contradictions.slice(0, 5)) {
+    issues.push({
+      type: "duplicate",
+      path: c.pages[0],
+      message: `⚠️ 需决策: ${c.reason}`,
+      severity: "warning",
+    });
+  }
+
+  // P4.3: Duplicate content detection — pages with >70% similarity
+  const dupes = detectDuplicates(allPagesArr, 0.7);
+  for (const d of dupes) {
+    issues.push({
+      type: "duplicate",
+      path: d.pageA,
+      message: `与 ${d.pageB} 内容相似度 ${Math.round(d.similarity * 100)}%，可能重复`,
+      severity: "info",
+    });
   }
 
   // Auto-fix: mark stale pages

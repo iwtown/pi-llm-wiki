@@ -10,13 +10,15 @@ import { readFile, writeFile, appendToFile } from "../client";
 import { markCompiled } from "../manifest";
 import { PATHS, WIKI_TYPES } from "../config";
 import { detectProject } from "../project";
+import { collectWikiPages, detectKnowledgeUpgrade } from "../system/analyzer";
 
 export interface CompileResult {
   rawPath: string;
   wikiPath: string;
   wikiType: string;
-  linkedTo: string[]; // paths of wiki pages that should be updated
+  linkedTo: string[];
   insights: string[];
+  upgrades?: { insight: string; projectCount: number; suggestedTarget: string }[];
 }
 
 export async function compile(
@@ -116,11 +118,47 @@ ${linkLines || "暂无关联"}
     .filter((line) => line.length > 5)
     .slice(0, 5);
 
+  // P4.1: Detect knowledge upgrade candidates
+  const allPages = collectWikiPages();
+  const upgrades = detectKnowledgeUpgrade(insightLines, projectName, allPages);
+  const upgradeNotes: string[] = [];
+  if (upgrades.length > 0) {
+    const upgradeText = upgrades
+      .map(
+        (u) =>
+          `- 💡 "${u.insight.slice(0, 80)}..." 已在 **${u.projectCount} 个项目**中出现 (${u.projects.join(", ")})，建议升级为全局[[wiki/${u.suggestedTarget}/|${u.suggestedTarget}]]`
+      )
+      .join("\n");
+    upgradeNotes.push(
+      "\n> [!tip] 知识升级建议",
+      "> 编译时检测到此 session 中的洞察已跨项目验证：",
+      ...upgradeText.split("\n").map((l) => `> ${l}`),
+      ""
+    );
+
+    // Inject upgrade callout into the written wiki page
+    try {
+      const current = await readFile(wikiPath);
+      const injected = current.replace(
+        "## 🔗 相关链接",
+        upgradeNotes.join("\n") + "\n## 🔗 相关链接"
+      );
+      await writeFile(wikiPath, injected);
+    } catch {
+      // non-fatal
+    }
+  }
+
   return {
     rawPath,
     wikiPath,
     wikiType: wikiDir,
     linkedTo: links,
     insights: insightLines,
+    ...(upgrades.length > 0 ? { upgrades: upgrades.map((u) => ({
+      insight: u.insight,
+      projectCount: u.projectCount,
+      suggestedTarget: u.suggestedTarget,
+    })) } : {}),
   };
 }

@@ -139,12 +139,16 @@ export default function (pi: ExtensionAPI) {
         result.insights.length > 0
           ? `💡 提取到 ${result.insights.length} 条洞察:\n${result.insights.map((s) => `  - ${s}`).join("\n")}\n\n`
           : "";
+      const upgradeLine =
+        result.upgrades && result.upgrades.length > 0
+          ? `🚀 知识升级: ${result.upgrades.length} 条洞察已跨项目验证:\n${result.upgrades.map((u) => `  - "${u.insight.slice(0, 60)}..." → ${u.projectCount} 个项目 → 建议 ${u.suggestedTarget}`).join("\n")}\n\n`
+          : "";
       return {
         content: [
           {
             type: "text",
             text:
-              `✅ 编译完成\n> ${result.rawPath} → ${result.wikiPath}\n> 类型: ${result.wikiType}\n\n${insightsLine}🔗 需织入的页面:\n${linkedList || "  无"}\n\n⚠️ 请立即执行 obs-weave 更新关联页面。`,
+              `✅ 编译完成\n> ${result.rawPath} → ${result.wikiPath}\n> 类型: ${result.wikiType}\n\n${insightsLine}${upgradeLine}🔗 需织入的页面:\n${linkedList || "  无"}\n\n⚠️ 请立即执行 obs-weave 更新关联页面。`,
           },
         ],
         details: result,
