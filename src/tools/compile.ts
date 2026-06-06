@@ -73,10 +73,11 @@ export async function compile(
 
   const wikiContent = `---
 title: "${title}"
-tags: [${wikiDir.toLowerCase()}, compiled]
+tags: [wiki/${wikiDir}, compiled]
 type: "${wikiDir}"
 project: "${projectName}"
 source: "${rawPath}"
+cssclasses: ["${wikiDir}"]
 ${dateLine}
 compiled: ${date}
 related: [${links.join(", ")}]

@@ -31,7 +31,7 @@ export async function capture(
       : `wiki/${wikiType}`;
   const filePath = `${wikiDir}/${safeName}.md`;
 
-  const tagList = [...(params.tags ?? []), wikiType.toLowerCase(), "captured"];
+  const tagList = [...(params.tags ?? []), `wiki/${wikiType}`, "captured"];
   const relatedLine = params.relatedPages?.map((r) => `[[${r}]]`).join(", ") ?? "";
 
   const action: "created" | "updated" = (await exists(filePath)) ? "updated" : "created";
@@ -41,6 +41,7 @@ title: "${title}"
 tags: [${tagList.join(", ")}]
 type: "${wikiType}"
 project: "${projectName}"
+cssclasses: ["${wikiType}"]
 date: ${date}
 captured: ${date}
 related: [${params.relatedPages?.join(", ") ?? ""}]
