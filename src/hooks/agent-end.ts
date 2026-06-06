@@ -186,7 +186,7 @@ export async function autoIngest(pi: ExtensionAPI): Promise<void> {
       // Try to build summary from pi-observational-memory
       const { obs, refs } = extractObservations(entries);
       dlog(`extracted obs=${obs.length} refs=${refs.length}`);
-      const summary = buildAutoSummary(obs, refs);
+      let summary = buildAutoSummary(obs, refs);
 
       if (!summary) {
         dlog(`buildAutoSummary returned null (OM data empty) — trying fallback from raw user messages`);
