@@ -1,8 +1,8 @@
 /**
  * pi-llm-wiki — Main entry point.
- * Registers 7 knowledge management tools + 2 lifecycle hooks for Pi Agent × Obsidian LLM-Wiki.
+ * Registers 9 knowledge management tools + 3 lifecycle hooks for Pi Agent × Obsidian LLM-Wiki.
  *
- * Tools: obs-ingest, obs-query, obs-compile, obs-weave, obs-lint, obs-capture, obs-reference
+ * Tools: obs-ingest, obs-query, obs-compile, obs-weave, obs-lint, obs-capture, obs-reference, obs-aggregate, obs-distill
  * Hooks: before_agent_start (inject schema), agent_end (auto ingest safety net)
  */
 
@@ -20,6 +20,8 @@ import { weave } from "./tools/weave";
 import { lint } from "./tools/lint";
 import { capture } from "./tools/capture";
 import { reference } from "./tools/reference";
+import { aggregate } from "./tools/aggregate";
+import { distill } from "./tools/distill";
 
 export default function (pi: ExtensionAPI) {
   // ─── Hooks ───────────────────────────────────────────────
@@ -330,6 +332,77 @@ export default function (pi: ExtensionAPI) {
             type: "text",
             text:
               `📎 已创建跨库引用\n> ${result.path}\n> 来源: ${result.source.vault}/${result.source.path}`,
+          },
+        ],
+        details: result,
+      };
+    },
+  });
+
+  // ─── Tool: obs-aggregate ─────────────────────────────────
+
+  pi.registerTool({
+    name: "obs_aggregate",
+    label: "obs-aggregate: Quarterly Knowledge Aggregation",
+    description:
+      "Aggregate compiled wiki pages from a quarter into wiki/记忆/YYYY/Qn.md. " +
+      "Extracts key themes and source pages. " +
+      "Triggers: quarterly review, 季度聚合, aggregate.",
+    parameters: Type.Object({
+      year: Type.Number({ description: "Year, e.g. 2026." }),
+      quarter: Type.Number({ description: "Quarter: 1-4." }),
+      project: Type.Optional(Type.String({ description: "Optional: specific project to aggregate." })),
+    }),
+    async execute(toolCallId, params, _signal, _onUpdate, ctx) {
+      const result = await aggregate(
+        { year: params.year, quarter: params.quarter, project: params.project },
+        ctx
+      );
+      if (!result) {
+        return {
+          content: [{ type: "text", text: `📭 ${params.year} Q${params.quarter} 无编译页面可聚合。` }],
+          details: null,
+        };
+      }
+      return {
+        content: [
+          {
+            type: "text",
+            text:
+              `📚 ${params.year} Q${params.quarter} 季度聚合完成\n> ${result.outputPath}\n> ${result.pageCount} 个页面\n> ${result.keyThemes.length} 个关键主题\n\n${result.keyThemes.slice(0, 5).map((t) => `  - ${t}`).join("\n")}`,
+          },
+        ],
+        details: result,
+      };
+    },
+  });
+
+  // ─── Tool: obs-distill ───────────────────────────────────
+
+  pi.registerTool({
+    name: "obs_distill",
+    label: "obs-distill: Distill Experience Logs",
+    description:
+      "Distill the ## 📋 经验日志 section of a wiki page into a narrative summary, then clear the log. " +
+      "Per schema Rule 7: convergent distillation (monthly). " +
+      "Triggers: when experience log is too long, 蒸馏, distill.",
+    parameters: Type.Object({
+      pagePath: Type.String({ description: "Path to the wiki page, e.g. 'wiki/发现/agent-自动记录兜底机制.md'." }),
+    }),
+    async execute(toolCallId, params, _signal, _onUpdate, ctx) {
+      const result = await distill(params.pagePath, ctx);
+      if (!result) {
+        return {
+          content: [{ type: "text", text: `📭 ${params.pagePath} 无经验日志可蒸馏。` }],
+          details: null,
+        };
+      }
+      return {
+        content: [
+          {
+            type: "text",
+            text:
+              `⚗️ 蒸馏完成\n> ${result.pagePath}\n> ${result.logCount} 条经验日志 → 摘要\n\n${result.summary.slice(0, 500)}`,
           },
         ],
         details: result,
