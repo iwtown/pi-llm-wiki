@@ -59,6 +59,73 @@ function extractObservations(entries: any[]): { obs: OmObservation[]; refs: OmRe
   return { obs, refs };
 }
 
+function extractUserMessages(entries: any[]): string[] {
+  const messages: string[] = [];
+  for (const e of entries) {
+    if (e.type !== "user") continue;
+    const text = extractMessageText(e.message ?? e);
+    if (text) messages.push(text);
+  }
+  return messages;
+}
+
+function extractMessageText(msg: any): string {
+  if (!msg) return "";
+  if (typeof msg === "string") return msg;
+  // content can be string | ContentBlock[] | {text: string} | {content: ...}
+  const content = msg.content ?? msg.text ?? msg.message;
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) {
+    return content
+      .filter((b: any) => b && (b.type === "text" || b.type === "input_text"))
+      .map((b: any) => b.text)
+      .join(" ");
+  }
+  if (content && typeof content === "object" && typeof (content as any).text === "string") {
+    return (content as any).text;
+  }
+  return "";
+}
+
+function buildFallbackSummary(entries: any[]): string | null {
+  const userMessages = extractUserMessages(entries);
+  if (userMessages.length === 0) return null;
+
+  const date = new Date().toISOString().split("T")[0];
+  const lines: string[] = [`## 会话复盘 — ${date}`, ""];
+  lines.push("> 🤖 自动兜底复盘（agent_end fallback — OM 数据不可用，从原始用户消息提取）", "");
+
+  // First user message → session goal
+  const maxLen = 300;
+  const goal = userMessages[0].length > maxLen ? userMessages[0].substring(0, maxLen) + "..." : userMessages[0];
+  lines.push("### 🎯 会话主题", "");
+  lines.push(goal, "");
+
+  // Remaining user messages → activity log (last 10, dedup short)
+  const remaining = userMessages.slice(1);
+  if (remaining.length > 0) {
+    const seen = new Set<string>();
+    const activities: string[] = [];
+    for (let i = remaining.length - 1; i >= 0 && activities.length < 10; i--) {
+      const short = remaining[i].substring(0, 150);
+      const key = short.toLowerCase().trim();
+      if (!seen.has(key)) {
+        seen.add(key);
+        activities.unshift(`- ${remaining[i].length > 150 ? short + "..." : short}`);
+      }
+    }
+    if (activities.length > 0) {
+      lines.push(`### 📋 会话活动 (${userMessages.length} 条用户消息)`, "");
+      lines.push(...activities, "");
+    }
+  }
+
+  lines.push("### ⚠️ 注意", "");
+  lines.push("本复盘由 agent_end 自动生成（OM 数据不可用回退），可能缺少结构化目标和决策。");
+
+  return lines.join("\n");
+}
+
 function buildAutoSummary(obs: OmObservation[], refs: OmReflection[]): string | null {
   const meaningful = obs.filter((o) => o.relevance !== "low");
   if (meaningful.length === 0 && refs.length === 0) return null;
@@ -122,7 +189,12 @@ export async function autoIngest(pi: ExtensionAPI): Promise<void> {
       const summary = buildAutoSummary(obs, refs);
 
       if (!summary) {
-        dlog(`buildAutoSummary returned null — skipping`);
+        dlog(`buildAutoSummary returned null (OM data empty) — trying fallback from raw user messages`);
+        summary = buildFallbackSummary(entries);
+      }
+
+      if (!summary) {
+        dlog(`buildFallbackSummary also returned null — skipping (no user messages found)`);
         return;
       }
 
