@@ -1,7 +1,7 @@
 # pi-llm-wiki 开发计划书
 
-> 版本：`v1.0.0` → `v1.1.0-dev`（Phase 1 ✅，监控迁移待做）  
-> 安装：`~/pi-llm-wiki/`，全局 local package，`pi install` 注册  
+> 版本：`v1.2.0-dev`（P1 ✅，P0 写降级 + 监控迁移进行中）  
+> 位置：`~/projects/.dotfiles/modules/pi-llm-wiki/`（dotfiles submodule）  
 > 依赖：Obsidian Local REST API (`localhost:27126`) + `pi-observational-memory`
 
 ---
@@ -15,9 +15,10 @@
 | 全局注册 (`~/.pi/agent/settings.json`) | ✅ `"../../pi-llm-wiki"` |
 | `package.json` 符合 Pi 规范 (`pi.extensions`) | ✅ |
 | TypeScript strict 编译 | ✅ 零错误 |
-| 14 个源文件完整 | ✅ |
-| Git 版本管理 (9 commits) | ✅ |
-| 系统监控页面自动生成 | ❌ 未迁移 | 见 §三 |
+| 15 个源文件完整 | ✅ |
+| Git 版本管理 | ✅ |
+| 写可靠性（REST API 降级） | ❌ 未实现 | 见 P0.0 |
+| 系统监控页面自动生成 | ❌ 未迁移 | 见 P0 |
 
 ### 7 工具全部可用
 
@@ -31,25 +32,26 @@
 | `obs_capture` | ✅ | 洞察回流 |
 | `obs_reference` | ✅ | 跨库引用卡片 |
 
-### 2 Hooks 工作正常
+### 3 Hooks 工作正常
 
 | Hook | 验证 | 备注 |
 |------|------|------|
-| `before_agent_start` | ✅ | schema.md 注入 system prompt，5min 缓存 |
-| `agent_end` | ✅ | 去重（markIngested）+ 读取 observational-memory 生成有内容复盘 |
+| `before_agent_start` | ✅ | schema.md 注入 system prompt，5min 缓存，API 不可用时读文件系统 |
+| `agent_end` | ✅ | `getBranch()` API 读 OM observations + fallback 原始用户消息提取 + dlog 调试日志 |
+| `startup_recovery` | ✅ | 启动时扫描孤儿 session（崩溃/强杀），直接写 vault 文件系统补入 |
 
-### 已修复的关键问题（本次会话）
+### 已修复的关键问题
 
-| 问题 | 修复 | Commit |
-|------|------|--------|
-| API key 硬编码 | 环境变量 `OBSIDIAN_LLM_WIKI_KEY` + 单次警告 | `1832d42` |
-| `detectProject` 只取 basename (pi vs Pi-Agent) | 读 AGENTS.md `#` 标题 | `a23e110` |
-| `agent_end` 每次创建空壳 | markIngested 去重 | `8d12438` |
-| `agent_end` 无内容空壳 | 集成 pi-observational-memory 提取 observations | `c18f7be` |
-| `package.json` 非规范字段 | `pi.extensions` 替代自定义字段 | `fd35dd7` |
-| 断链检测死逻辑 (lint.ts) | 修复匹配逻辑 | 审计修复 |
-| YAML frontmatter 转义缺失 | `quoteYaml()` 函数 | 审计修复 |
-| 多处未使用导入 | 清理 | 审计修复 |
+| 问题 | 修复 | 日期 |
+|------|------|------|
+| API key 硬编码 | 环境变量 `OBSIDIAN_LLM_WIKI_KEY` | 迁移前 |
+| `detectProject` 只取 basename | 读 AGENTS.md `#` 标题 | 迁移前 |
+| `agent_end` 空壳 | markIngested 去重 + OM 集成 | 迁移前 |
+| `agent_end` 完全不触发 | `getEntries()` → `getBranch()`，与 OM API 对齐 | 2026-06-06 |
+| `agent_end` OM 数据为空时跳过 | fallback 原始用户消息提取 | 2026-06-06 |
+| 崩溃/强杀后 session 丢失 | `startup-recovery.ts` 启动扫描孤儿 session | 2026-06-06 |
+| ingest 同名标题覆盖 | 文件名加 HHmmss 后缀 | 2026-06-06 |
+| 调试不可观测 | dlog → `/tmp/pi-llm-wiki-debug.log` | 2026-06-06 |
 
 ---
 
@@ -124,41 +126,57 @@ recall tool                     →    obs_ingest (LLM 手动调用)
 
 ## 四、优先级排序的改进计划
 
-### P0 — 监控系统迁移（本阶段）
+> 优先级重新评估（2026-06-06）：agent_end 故障和 REST API 单点依赖是最紧急问题，
+> 监控系统次之——能告知问题但不能修复问题。
+
+### P0 — 写可靠性（本阶段优先）
 
 | # | 任务 | 产出 |
 |---|------|------|
-| P0.1 | `src/system/dashboard.ts` — 仪表盘生成器 | `wiki/仪表盘.md` 自动刷新：编译率、健康评分、项目分布、最近操作 |
-| P0.2 | `src/system/audit.ts` — 流程巡检生成器 | `wiki/流程巡检.md` 自动刷新：5 阶段检查（C1-C5）、环比退化、警报分级 |
-| P0.3 | `src/system/tracker.ts` — 问题追踪生成器 | `wiki/问题追踪.md` 自动刷新：待编译队列、最近关闭、只追踪管线 |
-| P0.4 | 注册到 `before_agent_start` hook | 每次会话启动自动刷新三个页面 |
-| P0.5 | 环境变量已设置 (`OBSIDIAN_LLM_WIKI_KEY`) | ✅ 已完成 — `~/.profile` + `~/.bashrc` |
+| P0.0 | `ingest.ts` 写文件系统降级 | REST API 不可用时 `fs.writeFileSync` 直接写 vault，去掉单点依赖 |
 
-### P1 — 工作流闭环（✅ 已完成 — commit `4121112`）
+### P1 — 监控系统迁移
+
+| # | 任务 | 产出 |
+|---|------|------|
+| P1.1 | `src/system/dashboard.ts` — 仪表盘生成器 | `wiki/仪表盘.md` 自动刷新：编译率、健康评分、项目分布、最近操作 |
+| P1.2 | `src/system/audit.ts` — 流程巡检生成器 | `wiki/流程巡检.md` 自动刷新：5 阶段检查（C1-C5）、环比退化、警报分级 |
+| P1.3 | `src/system/tracker.ts` — 问题追踪生成器 | `wiki/问题追踪.md` 自动刷新：待编译队列、最近关闭、只追踪管线 |
+| P1.4 | 注册到 `before_agent_start` hook | 每次会话启动自动刷新三个页面 |
+| P1.5 | 环境变量已设置 (`OBSIDIAN_LLM_WIKI_KEY`) | ✅ 已完成 |
+
+### P2 — 工作流闭环（3/4 完成）
 
 | # | 任务 | 对应 schema 规则 | 状态 |
 |---|------|-----------------|------|
-| P1.1 | `obs_weave` 自动更新 `wiki/图谱.md` | 规则 6 | ✅ 已实现 |
-| P1.2 | `obs_compile` 显示提取的 insights 数量和内容 | 规则 3.5 (编译前确认) | ✅ 已实现 |
-| P1.3 | `obs_lint` 自动标记 stale（`fix=true` 更新 frontmatter） | 规则 5 | ✅ 已实现 |
-| P1.4 | `obs_query` 多级检索：图谱 → REST API | §8 | ✅ 已实现 |
+| P2.1 | `obs_weave` 自动更新 `wiki/图谱.md` | 规则 6 | ✅ |
+| P2.2 | `obs_compile` 显示提取的 insights 数量和内容 | 规则 3.5 | ✅ |
+| P2.3 | `obs_lint` 自动标记 stale（`fix=true`） | 规则 5 | ✅ |
+| P2.4 | `obs_query` 深度控制（brief/normal/full） | §8 | ⚠️ 参数接受但未生效，需实现 |
 
-### P2 — 知识进化（两周内）
+### P3 — 健壮性增强
+
+| # | 任务 | 说明 |
+|---|------|------|
+| P3.1 | agent_end 去重增强 | 当天同一 session 已摄入则跳过（不仅是 markIngested 标记） |
+| P3.2 | startup recovery 增量优化 | 用 marker 文件替代时间戳，避免重复扫描 |
+| P3.3 | 调试日志结构化 | dlog 从 `/tmp/` 临时文件升级到标准化日志 |
+
+### P4 — 知识进化
 
 | # | 任务 | 对应 schema 规则 |
 |---|------|-----------------|
-| P2.1 | `obs_compile` 知识升级检测（2+ 项目 → 全局） | §7.2 |
-| P2.2 | `obs_lint` 矛盾检测（同一主题多版本） | §7.2 |
-| P2.3 | `obs_lint` 重复内容检测 | §7.2 |
-| P2.4 | `obs_query` 深度控制实现（brief/normal/full） | §8 | ✅ 已实现（参数已添加） |
+| P4.1 | `obs_compile` 知识升级检测（2+ 项目 → 全局） | §7.2 |
+| P4.2 | `obs_lint` 矛盾检测（同一主题多版本） | §7.2 |
+| P4.3 | `obs_lint` 重复内容检测 | §7.2 |
 
-### P3 — 长期维护（月度）
+### P5 — 长期维护
 
 | # | 任务 |
 |---|------|
-| P3.1 | 新工具 `obs_aggregate`：季度精华 → `wiki/记忆/YYYY/Qn.md` |
-| P3.2 | 新工具 `obs_distill`：读经验日志 → 重写摘要 → 清空 |
-| P3.3 | REST API 不可用时的文件系统直写降级 |
+| P5.1 | 新工具 `obs_aggregate`：季度精华 → `wiki/记忆/YYYY/Qn.md` |
+| P5.2 | 新工具 `obs_distill`：读经验日志 → 重写摘要 → 清空 |
+| P5.3 | 自动化测试套件（验收标准来自 §五） |
 
 ---
 
@@ -183,14 +201,15 @@ recall tool                     →    obs_ingest (LLM 手动调用)
 ├── ROADMAP.md            # 本文件
 ├── .gitignore
 └── src/
-    ├── index.ts          # 入口：注册 7 tools + 2 hooks
+    ├── index.ts          # 入口：注册 7 tools + 3 hooks
     ├── config.ts         # Vault 路径、API key、阈值
     ├── client.ts         # Obsidian REST API 封装
     ├── manifest.ts       # 编译/织入/linted 状态追踪
     ├── project.ts        # 项目检测（AGENTS.md 标题）
     ├── hooks/
-    │   ├── before-start.ts   # schema.md 注入 system prompt
-    │   └── agent-end.ts      # 智能兜底 + observational-memory 集成
+    │   ├── before-start.ts       # schema.md 注入 system prompt
+    │   ├── agent-end.ts          # OM 集成 + fallback 原始消息 + dlog
+    │   └── startup-recovery.ts   # 启动孤儿 session 扫描恢复
     ├── tools/
     │   ├── ingest.ts     # obs_ingest
     │   ├── query.ts      # obs_query
@@ -199,7 +218,7 @@ recall tool                     →    obs_ingest (LLM 手动调用)
     │   ├── lint.ts       # obs_lint
     │   ├── capture.ts    # obs_capture
     │   └── reference.ts  # obs_reference
-    └── system/           # ⏳ P0 — 监控页面生成（待实现）
+    └── system/           # ⏳ P1 — 监控页面生成（待实现）
         ├── dashboard.ts  # 仪表盘生成器
         ├── audit.ts      # 流程巡检生成器
         └── tracker.ts    # 问题追踪生成器

@@ -2,34 +2,26 @@
  * pi-llm-wiki — obs-ingest tool.
  * Writes a session retrospective to raw/sessions/<project>/YYYY-MM-DD-<topic>.md
  * Extracts only: goals, decisions, insights, open issues. ≤500 words.
+ * Falls back to filesystem writes when Obsidian REST API is unavailable.
  */
 
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { writeFile, appendToFile } from "../client";
+import * as fs from "node:fs";
+import * as path from "node:path";
+import { writeFile, appendToFile, ping } from "../client";
 import { detectProject } from "../project";
-import { PATHS, INGEST_MAX_CHARS } from "../config";
+import { PATHS, INGEST_MAX_CHARS, LLM_WIKI } from "../config";
 
-export async function ingest(
+const VAULT_BASE = LLM_WIKI.vault;
+
+function buildTemplate(
+  firstLine: string,
+  projectName: string,
+  date: string,
+  sessionId: string,
   content: string,
-  ctx: ExtensionContext
-): Promise<{ path: string; project: string }> {
-  const project = detectProject(ctx.cwd ?? process.cwd());
-  const projectName = project?.name ?? "unknown";
-  const date = new Date().toISOString().split("T")[0];
-
-  // Build safe filename from first line + session ID suffix to avoid collisions
-  const firstLine = content.split("\n")[0]?.replace(/^#+\s*/, "").trim() ?? "session";
-  const safeTopic = firstLine.replace(/[^a-zA-Z0-9\u4e00-\u9fff_-]/g, "-").slice(0, 50);
-  const time = new Date().toISOString().split("T")[1]?.replace(/:/g, "").slice(0, 6) ?? "";
-  const fileName = `${date}-${safeTopic || "session"}-${time}.md`;
-  const dirPath = `${PATHS.rawSessions}/${projectName}`;
-  const filePath = `${dirPath}/${fileName}`;
-
-  // Extract session ID from context
-  const sessionId = (ctx as any).sessionManager?.sessionId ?? "";
-
-  // Ensure directory exists by writing the file (Obsidian API creates dirs)
-  const template = `---
+): string {
+  return `---
 title: "${firstLine}"
 project: "${projectName}"
 date: ${date}
@@ -44,16 +36,78 @@ tags: [session, ${projectName}]
 
 ${content.slice(0, INGEST_MAX_CHARS)}
 `;
+}
 
-  await writeFile(filePath, template);
+/** Write template via REST API, falling back to filesystem on failure */
+async function writeWithFallback(
+  vaultPath: string,
+  fsPath: string,
+  template: string,
+): Promise<"api" | "fs" | "fail"> {
+  // Try REST API first
+  try {
+    await writeFile(vaultPath, template);
+    return "api";
+  } catch (apiErr: any) {
+    console.error(`[pi-llm-wiki] REST API write failed (${apiErr.message}), falling back to filesystem`);
+  }
+
+  // Fallback: write directly to vault filesystem
+  try {
+    const dir = path.dirname(fsPath);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(fsPath, template, "utf-8");
+    return "fs";
+  } catch (fsErr: any) {
+    console.error(`[pi-llm-wiki] Filesystem write also failed: ${fsErr.message}`);
+    return "fail";
+  }
+}
+
+export async function ingest(
+  content: string,
+  ctx: ExtensionContext
+): Promise<{ path: string; project: string; writeMode: "api" | "fs" }> {
+  const project = detectProject(ctx.cwd ?? process.cwd());
+  const projectName = project?.name ?? "unknown";
+  const date = new Date().toISOString().split("T")[0];
+
+  // Build safe filename from first line + timestamp to avoid collisions
+  const firstLine = content.split("\n")[0]?.replace(/^#+\s*/, "").trim() ?? "session";
+  const safeTopic = firstLine.replace(/[^a-zA-Z0-9\u4e00-\u9fff_-]/g, "-").slice(0, 50);
+  const time = new Date().toISOString().split("T")[1]?.replace(/:/g, "").slice(0, 6) ?? "";
+  const fileName = `${date}-${safeTopic || "session"}-${time}.md`;
+  const vaultPath = `${PATHS.rawSessions}/${projectName}/${fileName}`;
+  const fsPath = path.join(VAULT_BASE, vaultPath);
+
+  // Extract session ID from context
+  const sessionId = (ctx as any).sessionManager?.sessionId ?? "";
+
+  const template = buildTemplate(firstLine, projectName, date, sessionId, content);
+
+  const writeMode = await writeWithFallback(vaultPath, fsPath, template);
+  if (writeMode === "fail") {
+    throw new Error(`Failed to write session to both API and filesystem: ${vaultPath}`);
+  }
 
   // Append to log.md
   const logLine = `## [${date}] ingest | ${projectName} — ${firstLine}`;
+  const logVaultPath = PATHS.log;
+  const logFsPath = path.join(VAULT_BASE, logVaultPath);
   try {
-    await appendToFile(PATHS.log, logLine);
+    await appendToFile(logVaultPath, logLine);
   } catch {
-    // log write failure is non-fatal
+    // Fallback: append to log via filesystem
+    try {
+      const existing = fs.existsSync(logFsPath)
+        ? fs.readFileSync(logFsPath, "utf-8")
+        : "";
+      const updated = existing + (existing && !existing.endsWith("\n") ? "\n" : "") + logLine + "\n";
+      fs.writeFileSync(logFsPath, updated, "utf-8");
+    } catch {
+      // log write failure is non-fatal
+    }
   }
 
-  return { path: filePath, project: projectName };
+  return { path: vaultPath, project: projectName, writeMode };
 }
