@@ -89,6 +89,7 @@ export async function query(
   const limit = params.limit ?? QUERY_DEFAULT_LIMIT;
 
   // Step 1: Check 图谱.md for matching pages (cheapest — §8)
+  const depth = params.depth ?? "normal";
   const atlasResults: QueryResult[] = [];
   try {
     const atlasContent = await readFile(PATHS.index);
@@ -107,35 +108,72 @@ export async function query(
       .sort((a, b) => b.score - a.score)
       .slice(0, limit);
 
-    // Enrich matched atlas pages
-    for (const s of scored) {
-      const fullPath = s.path.endsWith(".md") ? s.path : s.path + ".md";
-      const enriched = await enrichResult(fullPath, s.description, s.score);
-      enriched.source = "atlas";
-      atlasResults.push(enriched);
+    // brief: skip enrichment, return titles + paths only
+    if (depth === "brief") {
+      for (const s of scored) {
+        const fullPath = s.path.endsWith(".md") ? s.path : s.path + ".md";
+        atlasResults.push({
+          title: fullPath.replace(/^.*\//, "").replace(/\.md$/, ""),
+          path: fullPath,
+          snippet: s.description || "",
+          score: s.score,
+          source: "atlas",
+        });
+      }
+    } else {
+      // normal + full: enrich with frontmatter
+      for (const s of scored) {
+        const fullPath = s.path.endsWith(".md") ? s.path : s.path + ".md";
+        const enriched = await enrichResult(fullPath, s.description, s.score);
+        enriched.source = "atlas";
+        // full: also fetch body content
+        if (depth === "full") {
+          try {
+            const body = await readFile(fullPath);
+            // Append body preview (first 500 chars after frontmatter)
+            const bodyText = body.replace(/^---\n[\s\S]*?\n---\n?/, "").trim();
+            enriched.snippet = bodyText.slice(0, 500);
+          } catch {
+            // keep existing snippet on read failure
+          }
+        }
+        atlasResults.push(enriched);
+      }
     }
   } catch {
     // Atlas unavailable, fall through to search
   }
 
-  // If 图谱 gave enough results, return them
-  if (atlasResults.length >= limit) {
+  // Step 2: Full-text search via REST API for remaining slots
+  // Skip search for "brief" — return atlas results as-is
+  if (depth === "brief" || atlasResults.length >= limit) {
     return atlasResults.slice(0, limit);
   }
 
-  // Step 2: Full-text search via REST API for remaining slots
   const remaining = limit - atlasResults.length;
   let searchResults: QueryResult[] = [];
   try {
     const raw = await search(queryStr, remaining * 2);
     const enriched = await Promise.all(
       raw.map(
-        async (r) =>
-          await enrichResult(
+        async (r) => {
+          const result = await enrichResult(
             r.filename,
             r.matches?.[0]?.context?.slice(0, 200) ?? "",
             r.score,
-          )
+          );
+          // full: fetch body content
+          if (depth === "full") {
+            try {
+              const body = await readFile(r.filename);
+              const bodyText = body.replace(/^---\n[\s\S]*?\n---\n?/, "").trim();
+              result.snippet = bodyText.slice(0, 500);
+            } catch {
+              // keep existing snippet
+            }
+          }
+          return result;
+        }
       )
     );
     searchResults = enriched.map((r) => ({ ...r, source: "search" as const }));
