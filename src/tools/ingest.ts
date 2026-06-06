@@ -34,6 +34,8 @@ tags: [session, ${projectName}]
 
 # ${firstLine}
 
+- [ ] 编译: ${firstLine} 📅 ${date}
+
 ${content.slice(0, INGEST_MAX_CHARS)}
 `;
 }
