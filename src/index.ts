@@ -12,6 +12,7 @@ import { Type } from "typebox";
 import { injectSchema } from "./hooks/before-start";
 import { autoIngest, markIngested } from "./hooks/agent-end";
 import { registerStartupRecovery } from "./hooks/startup-recovery";
+import { refreshSystemPages } from "./system/refresh";
 import { ingest } from "./tools/ingest";
 import { query } from "./tools/query";
 import { compile } from "./tools/compile";
@@ -30,6 +31,7 @@ export default function (pi: ExtensionAPI) {
     console.error("[pi-llm-wiki] agent-end hook failed:", e)
   );
   registerStartupRecovery(pi);
+  refreshSystemPages(pi);
 
   // ─── Tool: obs-ingest ────────────────────────────────────
 
