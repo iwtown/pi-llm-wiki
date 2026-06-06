@@ -6,7 +6,12 @@
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import * as fs from "node:fs";
+import * as path from "node:path";
 import { ingest } from "../tools/ingest";
+import { detectProject } from "../project";
+import { LLM_WIKI, PATHS } from "../config";
+
+const VAULT = LLM_WIKI.vault;
 
 const DEBUG_LOG = "/tmp/pi-llm-wiki-debug.log";
 function dlog(msg: string): void {
@@ -57,6 +62,27 @@ function extractObservations(entries: any[]): { obs: OmObservation[]; refs: OmRe
     }
   }
   return { obs, refs };
+}
+
+/** Check vault filesystem if this session was already ingested (defense-in-depth beyond markIngested) */
+function alreadyInVault(projectName: string, sessionId: string): boolean {
+  if (!sessionId) return false;
+  const dir = path.join(VAULT, PATHS.rawSessions, projectName);
+  let files: string[];
+  try {
+    files = fs.readdirSync(dir).filter((f) => f.endsWith(".md"));
+  } catch {
+    return false;
+  }
+  for (const f of files) {
+    try {
+      const content = fs.readFileSync(path.join(dir, f), "utf-8");
+      if (content.includes(`session_id: "${sessionId}"`)) return true;
+    } catch {
+      continue;
+    }
+  }
+  return false;
 }
 
 function extractUserMessages(entries: any[]): string[] {
@@ -182,6 +208,16 @@ export async function autoIngest(pi: ExtensionAPI): Promise<void> {
       );
       dlog(`alreadyIngested=${alreadyIngested}`);
       if (alreadyIngested) return; // skip — explicit ingest was done
+
+      // Defense-in-depth: check vault filesystem for duplicate session_id
+      const project = detectProject(ctx.cwd ?? process.cwd());
+      const projectName = project?.name ?? "unknown";
+      const sessionId = (ctx as any).sessionManager?.sessionId ?? "";
+      if (alreadyInVault(projectName, sessionId)) {
+        dlog(`skip: session ${sessionId} already in vault`);
+        markIngested(pi);
+        return;
+      }
 
       // Try to build summary from pi-observational-memory
       const { obs, refs } = extractObservations(entries);

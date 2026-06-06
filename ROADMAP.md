@@ -156,11 +156,11 @@ recall tool                     →    obs_ingest (LLM 手动调用)
 
 ### P3 — 健壮性增强
 
-| # | 任务 | 说明 |
-|---|------|------|
-| P3.1 | agent_end 去重增强 | 当天同一 session 已摄入则跳过（不仅是 markIngested 标记） |
-| P3.2 | startup recovery 增量优化 | 用 marker 文件替代时间戳，避免重复扫描 |
-| P3.3 | 调试日志结构化 | dlog 从 `/tmp/` 临时文件升级到标准化日志 |
+| # | 任务 | 说明 | 状态 |
+|---|------|------|------|
+| P3.1 | agent_end 去重增强 | 当天同一 session 已摄入则跳过（不仅是 markIngested 标记） | ⚠️ |
+| P3.2 | startup recovery 增量优化 | 用 marker 文件替代时间戳，避免重复扫描 | ⬜ |
+| P3.3 | 调试日志结构化 | dlog 从 `/tmp/` 临时文件升级到标准化日志 | ⬜ |
 
 ### P4 — 知识进化
 
