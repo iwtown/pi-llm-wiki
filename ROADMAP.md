@@ -1,6 +1,6 @@
 # pi-llm-wiki 开发计划书
 
-> 版本：`v1.4.0-dev`（P0-P3 ✅，P4 知识进化待开始）  
+> 版本：`v1.5.0-dev`（P0-P4 ✅，P5 长期维护待开始）  
 > 位置：`~/projects/.dotfiles/modules/pi-llm-wiki/`（dotfiles submodule）  
 > 依赖：Obsidian Local REST API (`localhost:27126`) + `pi-observational-memory`
 
@@ -162,13 +162,13 @@ recall tool                     →    obs_ingest (LLM 手动调用)
 | P3.2 | startup recovery 增量优化 | 时间戳扫描 → processed-set 增量标记 | ✅ |
 | P3.3 | 调试日志结构化 | dlog (临时) + slog (JSON → `~/.pi/agent/pi-llm-wiki.log`) | ✅ |
 
-### P4 — 知识进化
+### P4 — 知识进化 ✅
 
-| # | 任务 | 对应 schema 规则 |
-|---|------|-----------------|
-| P4.1 | `obs_compile` 知识升级检测（2+ 项目 → 全局） | §7.2 |
-| P4.2 | `obs_lint` 矛盾检测（同一主题多版本） | §7.2 |
-| P4.3 | `obs_lint` 重复内容检测 | §7.2 |
+| # | 任务 | 对应 schema 规则 | 状态 |
+|---|------|-----------------|------|
+| P4.1 | `obs_compile` 知识升级检测（2+ 项目 → 全局） | §7.2 | ✅ |
+| P4.2 | `obs_lint` 矛盾检测（同一主题多版本） | §7.2 | ✅ |
+| P4.3 | `obs_lint` 重复内容检测 | §7.2 | ✅ |
 
 ### P5 — 长期维护
 
