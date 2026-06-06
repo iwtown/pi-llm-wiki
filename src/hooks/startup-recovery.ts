@@ -13,11 +13,37 @@ import { PATHS, INGEST_MAX_CHARS, LLM_WIKI } from "../config";
 
 const INGEST_MARKER = "pi-llm-wiki:ingested";
 const STATE_FILE = "/tmp/pi-llm-wiki-recovery-last-run";
+const PROCESSED_FILE = path.join(
+  process.env.HOME ?? "/home",
+  ".pi/agent/.pi-llm-wiki-recovery-processed"
+);
 const SESSIONS_DIR = path.join(
   process.env.HOME ?? "/home",
   ".pi/agent/sessions"
 );
 const VAULT_BASE = LLM_WIKI.vault;
+
+function getProcessedIds(): Set<string> {
+  try {
+    const data = fs.readFileSync(PROCESSED_FILE, "utf-8");
+    return new Set(data.split("\n").map((l) => l.trim()).filter(Boolean));
+  } catch {
+    return new Set();
+  }
+}
+
+function markProcessed(ids: string[]): void {
+  if (ids.length === 0) return;
+  try {
+    const dir = path.dirname(PROCESSED_FILE);
+    fs.mkdirSync(dir, { recursive: true });
+    const existing = getProcessedIds();
+    for (const id of ids) existing.add(id);
+    fs.writeFileSync(PROCESSED_FILE, [...existing].join("\n") + "\n", "utf-8");
+  } catch {
+    // non-fatal
+  }
+}
 
 function dlog(msg: string): void {
   console.error(`[pi-llm-wiki:recovery] ${msg}`);
@@ -190,8 +216,8 @@ function saveRunTime(): void {
   fs.writeFileSync(STATE_FILE, String(Date.now()), "utf-8");
 }
 
-/** Scan sessions directory for orphan sessions */
-function findOrphanSessions(lastRun: number): string[] {
+/** Scan sessions directory for unprocessed sessions (not in processed set) */
+function findOrphanSessions(processed: Set<string>): string[] {
   const orphans: string[] = [];
 
   let projectDirs: string[];
@@ -203,8 +229,7 @@ function findOrphanSessions(lastRun: number): string[] {
 
   for (const dir of projectDirs) {
     const dirPath = path.join(SESSIONS_DIR, dir);
-    const stat = fs.statSync(dirPath);
-    if (!stat.isDirectory()) continue;
+    if (!fs.statSync(dirPath).isDirectory()) continue;
 
     let sessionFiles: string[];
     try {
@@ -214,15 +239,10 @@ function findOrphanSessions(lastRun: number): string[] {
     }
 
     for (const file of sessionFiles) {
-      const filePath = path.join(dirPath, file);
-      try {
-        const fileStat = fs.statSync(filePath);
-        // Only process sessions modified after last run (or all if first run)
-        if (fileStat.mtimeMs < lastRun) continue;
-      } catch {
-        continue;
-      }
-      orphans.push(filePath);
+      // Use basename (without .jsonl) as session identifier
+      const sessionId = file.replace(/\.jsonl$/, "");
+      if (processed.has(sessionId)) continue;
+      orphans.push(path.join(dirPath, file));
     }
   }
 
@@ -231,18 +251,22 @@ function findOrphanSessions(lastRun: number): string[] {
 
 export function registerStartupRecovery(pi: ExtensionAPI): void {
   pi.on("agent_start", async (_event, _ctx) => {
-    const lastRun = getLastRunTime();
-    dlog(`startup recovery scan, lastRun=${lastRun}`);
+    const processed = getProcessedIds();
+    dlog(`startup recovery scan, processed=${processed.size}`);
 
-    const orphans = findOrphanSessions(lastRun);
-    dlog(`found ${orphans.length} candidate sessions`);
+    const orphans = findOrphanSessions(processed);
+    dlog(`found ${orphans.length} unprocessed sessions`);
 
     let recovered = 0;
     let skipped = 0;
+    const newlyProcessed: string[] = [];
 
     for (const jsonlPath of orphans) {
       const sessionId = path.basename(jsonlPath, ".jsonl");
       const sessionDir = path.basename(path.dirname(jsonlPath));
+
+      // Always mark as processed so we don't rescan
+      newlyProcessed.push(sessionId);
 
       const { hasIngestMarker, userMessages } = parseSession(jsonlPath);
 
@@ -266,9 +290,9 @@ export function registerStartupRecovery(pi: ExtensionAPI): void {
       }
     }
 
-    saveRunTime();
+    markProcessed(newlyProcessed);
     dlog(
-      `startup recovery complete: ${recovered} recovered, ${skipped} skipped`
+      `startup recovery complete: ${recovered} recovered, ${skipped} skipped, ${newlyProcessed.length} marked`
     );
   });
 }
