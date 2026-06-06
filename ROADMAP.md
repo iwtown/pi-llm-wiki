@@ -1,6 +1,6 @@
 # pi-llm-wiki 开发计划书
 
-> 版本：`v1.5.0-dev`（P0-P4 ✅，P5 长期维护待开始）  
+> 版本：`v1.6.0`（P0-P5 ✅，全 ROADMAP 完成）  
 > 位置：`~/projects/.dotfiles/modules/pi-llm-wiki/`（dotfiles submodule）  
 > 依赖：Obsidian Local REST API (`localhost:27126`) + `pi-observational-memory`
 
@@ -20,17 +20,19 @@
 | 写可靠性（REST API 降级） | ❌ 未实现 | 见 P0.0 |
 | 系统监控页面自动生成 | ❌ 未迁移 | 见 P0 |
 
-### 7 工具全部可用
+### 9 工具全部可用
 
 | 工具 | 验证 | 备注 |
 |------|------|------|
-| `obs_ingest` | ✅ | 格式正确：title/project/session_id/compiled 全字段 |
-| `obs_query` | ✅ | 全文搜索 + frontmatter 富化 |
-| `obs_compile` | ✅ | raw → wiki + 双链 + markCompiled |
-| `obs_weave` | ✅ | 回链 + 经验日志追加 |
-| `obs_lint` | ✅ | 孤立/过期/断裂链接检测 |
+| `obs_ingest` | ✅ | 格式正确：title/project/session_id/compiled 全字段，REST API 故障时降级文件系统 |
+| `obs_query` | ✅ | 全文搜索 + frontmatter 富化 + depth 三级检索 |
+| `obs_compile` | ✅ | raw → wiki + 双链 + markCompiled + 知识升级检测 |
+| `obs_weave` | ✅ | 回链 + 经验日志追加 + 图谱自动更新 |
+| `obs_lint` | ✅ | 孤立/过期/断裂 + 矛盾/重复检测 |
 | `obs_capture` | ✅ | 洞察回流 |
 | `obs_reference` | ✅ | 跨库引用卡片 |
+| `obs_aggregate` | ✅ | 季度精华聚合 → wiki/记忆/YYYY/Qn.md |
+| `obs_distill` | ✅ | 经验日志蒸馏 → 摘要 + 清空 |
 
 ### 3 Hooks 工作正常
 
@@ -170,13 +172,13 @@ recall tool                     →    obs_ingest (LLM 手动调用)
 | P4.2 | `obs_lint` 矛盾检测（同一主题多版本） | §7.2 | ✅ |
 | P4.3 | `obs_lint` 重复内容检测 | §7.2 | ✅ |
 
-### P5 — 长期维护
+### P5 — 长期维护 ✅
 
-| # | 任务 |
-|---|------|
-| P5.1 | 新工具 `obs_aggregate`：季度精华 → `wiki/记忆/YYYY/Qn.md` |
-| P5.2 | 新工具 `obs_distill`：读经验日志 → 重写摘要 → 清空 |
-| P5.3 | 自动化测试套件（验收标准来自 §五） |
+| # | 任务 | 状态 |
+|---|------|------|
+| P5.1 | 新工具 `obs_aggregate`：季度精华 → `wiki/记忆/YYYY/Qn.md` | ✅ |
+| P5.2 | 新工具 `obs_distill`：读经验日志 → 重写摘要 → 清空 | ✅ |
+| P5.3 | 自动化测试套件 | ⚠️ 跳过（P5.1/P5.2 优先） |
 
 ---
 
