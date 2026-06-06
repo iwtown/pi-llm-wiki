@@ -218,7 +218,7 @@ recall tool                     →    obs_ingest (LLM 手动调用)
     │   ├── lint.ts       # obs_lint
     │   ├── capture.ts    # obs_capture
     │   └── reference.ts  # obs_reference
-    └── system/           # ⏳ P1 — 监控页面生成（待实现）
+    └── system/           # ✅ P1 — 监控页面生成
         ├── dashboard.ts  # 仪表盘生成器
         ├── audit.ts      # 流程巡检生成器
         └── tracker.ts    # 问题追踪生成器
