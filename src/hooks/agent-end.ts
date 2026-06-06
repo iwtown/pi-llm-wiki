@@ -14,10 +14,27 @@ import { LLM_WIKI, PATHS } from "../config";
 const VAULT = LLM_WIKI.vault;
 
 const DEBUG_LOG = "/tmp/pi-llm-wiki-debug.log";
+const STRUCTURED_LOG = path.join(
+  process.env.HOME ?? "/home",
+  ".pi/agent/pi-llm-wiki.log"
+);
+
 function dlog(msg: string): void {
   const ts = new Date().toISOString();
-  fs.appendFileSync(DEBUG_LOG, `[${ts}] ${msg}\n`);
+  const line = `[${ts}] ${msg}`;
+  fs.appendFileSync(DEBUG_LOG, `${line}\n`);
   console.error(`[pi-llm-wiki:DEBUG] ${msg}`);
+}
+
+/** Structured log entry for machine parsing */
+function slog(event: string, data: Record<string, unknown> = {}): void {
+  const ts = new Date().toISOString();
+  const entry = JSON.stringify({ ts, event, ...data });
+  try {
+    fs.appendFileSync(STRUCTURED_LOG, entry + "\n");
+  } catch {
+    // non-fatal
+  }
 }
 
 const INGEST_MARKER = "pi-llm-wiki:ingested";
@@ -198,6 +215,7 @@ function buildAutoSummary(obs: OmObservation[], refs: OmReflection[]): string | 
 export async function autoIngest(pi: ExtensionAPI): Promise<void> {
   pi.on("agent_end", async (event, ctx) => {
     const startTime = Date.now();
+    const sessionId = (ctx as any).sessionManager?.sessionId ?? "";
     dlog(`agent_end fired, sessionManager=${!!ctx.sessionManager}, getBranch=${typeof ctx.sessionManager?.getBranch}`);
     try {
       // Check if obs_ingest was already called this session
@@ -212,7 +230,6 @@ export async function autoIngest(pi: ExtensionAPI): Promise<void> {
       // Defense-in-depth: check vault filesystem for duplicate session_id
       const project = detectProject(ctx.cwd ?? process.cwd());
       const projectName = project?.name ?? "unknown";
-      const sessionId = (ctx as any).sessionManager?.sessionId ?? "";
       if (alreadyInVault(projectName, sessionId)) {
         dlog(`skip: session ${sessionId} already in vault`);
         markIngested(pi);
@@ -237,9 +254,11 @@ export async function autoIngest(pi: ExtensionAPI): Promise<void> {
       dlog(`calling ingest, summary length=${summary.length}, ctx.cwd=${ctx.cwd}`);
       await ingest(summary, ctx);
       dlog(`ingest completed in ${Date.now() - startTime}ms`);
+      slog("auto_ingest_ok", { project: projectName, sessionId, durationMs: Date.now() - startTime, hasOmData: obs.length > 0 || refs.length > 0 });
     } catch (e: any) {
       dlog(`Auto-ingest FAILED: ${e.message}`);
       if (e.stack) dlog(`Stack: ${e.stack}`);
+      slog("auto_ingest_fail", { error: e.message, sessionId });
     }
   });
 }
