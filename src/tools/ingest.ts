@@ -17,10 +17,11 @@ export async function ingest(
   const projectName = project?.name ?? "unknown";
   const date = new Date().toISOString().split("T")[0];
 
-  // Build safe filename from first line or topic
+  // Build safe filename from first line + session ID suffix to avoid collisions
   const firstLine = content.split("\n")[0]?.replace(/^#+\s*/, "").trim() ?? "session";
-  const safeTopic = firstLine.replace(/[^a-zA-Z0-9\u4e00-\u9fff_-]/g, "-").slice(0, 60);
-  const fileName = `${date}-${safeTopic || "session"}.md`;
+  const safeTopic = firstLine.replace(/[^a-zA-Z0-9\u4e00-\u9fff_-]/g, "-").slice(0, 50);
+  const time = new Date().toISOString().split("T")[1]?.replace(/:/g, "").slice(0, 6) ?? "";
+  const fileName = `${date}-${safeTopic || "session"}-${time}.md`;
   const dirPath = `${PATHS.rawSessions}/${projectName}`;
   const filePath = `${dirPath}/${fileName}`;
 
