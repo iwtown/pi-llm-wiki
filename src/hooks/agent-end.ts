@@ -5,7 +5,15 @@
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import * as fs from "node:fs";
 import { ingest } from "../tools/ingest";
+
+const DEBUG_LOG = "/tmp/pi-llm-wiki-debug.log";
+function dlog(msg: string): void {
+  const ts = new Date().toISOString();
+  fs.appendFileSync(DEBUG_LOG, `[${ts}] ${msg}\n`);
+  console.error(`[pi-llm-wiki:DEBUG] ${msg}`);
+}
 
 const INGEST_MARKER = "pi-llm-wiki:ingested";
 
@@ -96,26 +104,34 @@ function buildAutoSummary(obs: OmObservation[], refs: OmReflection[]): string | 
 
 export async function autoIngest(pi: ExtensionAPI): Promise<void> {
   pi.on("agent_end", async (event, ctx) => {
+    const startTime = Date.now();
+    dlog(`agent_end fired, sessionManager=${!!ctx.sessionManager}, getBranch=${typeof ctx.sessionManager?.getBranch}`);
     try {
       // Check if obs_ingest was already called this session
-      const entries = ctx.sessionManager?.getEntries?.() ?? [];
+      const entries = ctx.sessionManager?.getBranch?.() ?? [];
+      dlog(`getBranch returned ${entries.length} entries`);
       const alreadyIngested = entries.some(
         (e: any) => e.type === "custom" && e.customType === INGEST_MARKER
       );
+      dlog(`alreadyIngested=${alreadyIngested}`);
       if (alreadyIngested) return; // skip — explicit ingest was done
 
       // Try to build summary from pi-observational-memory
       const { obs, refs } = extractObservations(entries);
+      dlog(`extracted obs=${obs.length} refs=${refs.length}`);
       const summary = buildAutoSummary(obs, refs);
 
       if (!summary) {
-        // No meaningful observations — skip entirely instead of creating empty shell
+        dlog(`buildAutoSummary returned null — skipping`);
         return;
       }
 
+      dlog(`calling ingest, summary length=${summary.length}, ctx.cwd=${ctx.cwd}`);
       await ingest(summary, ctx);
+      dlog(`ingest completed in ${Date.now() - startTime}ms`);
     } catch (e: any) {
-      console.error(`[pi-llm-wiki] Auto-ingest failed: ${e.message}`);
+      dlog(`Auto-ingest FAILED: ${e.message}`);
+      if (e.stack) dlog(`Stack: ${e.stack}`);
     }
   });
 }
