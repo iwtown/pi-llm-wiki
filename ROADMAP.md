@@ -221,7 +221,9 @@ recall tool                     →    obs_ingest (LLM 手动调用)
     └── system/           # ✅ P1 — 监控页面生成
         ├── dashboard.ts  # 仪表盘生成器
         ├── audit.ts      # 流程巡检生成器
-        └── tracker.ts    # 问题追踪生成器
+        ├── tracker.ts    # 问题追踪生成器
+        ├── refresh.ts    # before_agent_start 自动刷新
+        └── analyzer.ts   # P4 — 跨页文本分析（相似度/升级/矛盾/重复）
 ```
 
 ---
