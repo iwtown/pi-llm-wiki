@@ -1,6 +1,6 @@
 # pi-llm-wiki 开发计划书
 
-> 版本：`v1.3.0-dev`（P0 ✅ P1 ✅，P2 健壮性增强进行中）  
+> 版本：`v1.4.0-dev`（P0-P3 ✅，P4 知识进化待开始）  
 > 位置：`~/projects/.dotfiles/modules/pi-llm-wiki/`（dotfiles submodule）  
 > 依赖：Obsidian Local REST API (`localhost:27126`) + `pi-observational-memory`
 
@@ -154,13 +154,13 @@ recall tool                     →    obs_ingest (LLM 手动调用)
 | P2.3 | `obs_lint` 自动标记 stale（`fix=true`） | 规则 5 | ✅ |
 | P2.4 | `obs_query` 深度控制（brief/normal/full） | §8 | ⚠️ 参数接受但未生效，需实现 |
 
-### P3 — 健壮性增强
+### P3 — 健壮性增强 ✅
 
 | # | 任务 | 说明 | 状态 |
 |---|------|------|------|
-| P3.1 | agent_end 去重增强 | 当天同一 session 已摄入则跳过（不仅是 markIngested 标记） | ⚠️ |
-| P3.2 | startup recovery 增量优化 | 用 marker 文件替代时间戳，避免重复扫描 | ⬜ |
-| P3.3 | 调试日志结构化 | dlog 从 `/tmp/` 临时文件升级到标准化日志 | ⬜ |
+| P3.1 | agent_end 去重增强 | markIngested + vault session_id 文件系统双重检查 | ✅ |
+| P3.2 | startup recovery 增量优化 | 时间戳扫描 → processed-set 增量标记 | ✅ |
+| P3.3 | 调试日志结构化 | dlog (临时) + slog (JSON → `~/.pi/agent/pi-llm-wiki.log`) | ✅ |
 
 ### P4 — 知识进化
 
