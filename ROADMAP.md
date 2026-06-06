@@ -1,6 +1,6 @@
 # pi-llm-wiki 开发计划书
 
-> 版本：`v1.2.0-dev`（P1 ✅，P0 写降级 + 监控迁移进行中）  
+> 版本：`v1.3.0-dev`（P0 ✅ P1 ✅，P2 健壮性增强进行中）  
 > 位置：`~/projects/.dotfiles/modules/pi-llm-wiki/`（dotfiles submodule）  
 > 依赖：Obsidian Local REST API (`localhost:27126`) + `pi-observational-memory`
 
@@ -129,21 +129,21 @@ recall tool                     →    obs_ingest (LLM 手动调用)
 > 优先级重新评估（2026-06-06）：agent_end 故障和 REST API 单点依赖是最紧急问题，
 > 监控系统次之——能告知问题但不能修复问题。
 
-### P0 — 写可靠性（本阶段优先）
+### P0 — 写可靠性 ✅
 
-| # | 任务 | 产出 |
-|---|------|------|
-| P0.0 | `ingest.ts` 写文件系统降级 | REST API 不可用时 `fs.writeFileSync` 直接写 vault，去掉单点依赖 |
+| # | 任务 | 产出 | 状态 |
+|---|------|------|------|
+| P0.0 | `ingest.ts` 写文件系统降级 | REST API 不可用时 `fs.writeFileSync` 直接写 vault | ✅ |
 
-### P1 — 监控系统迁移
+### P1 — 监控系统迁移 ✅
 
-| # | 任务 | 产出 |
-|---|------|------|
-| P1.1 | `src/system/dashboard.ts` — 仪表盘生成器 | `wiki/仪表盘.md` 自动刷新：编译率、健康评分、项目分布、最近操作 |
-| P1.2 | `src/system/audit.ts` — 流程巡检生成器 | `wiki/流程巡检.md` 自动刷新：5 阶段检查（C1-C5）、环比退化、警报分级 |
-| P1.3 | `src/system/tracker.ts` — 问题追踪生成器 | `wiki/问题追踪.md` 自动刷新：待编译队列、最近关闭、只追踪管线 |
-| P1.4 | 注册到 `before_agent_start` hook | 每次会话启动自动刷新三个页面 |
-| P1.5 | 环境变量已设置 (`OBSIDIAN_LLM_WIKI_KEY`) | ✅ 已完成 |
+| # | 任务 | 产出 | 状态 |
+|---|------|------|------|
+| P1.1 | `src/system/dashboard.ts` — 仪表盘生成器 | 编译率、健康评分、项目分布、最近操作 | ✅ |
+| P1.2 | `src/system/audit.ts` — 流程巡检生成器 | 5 阶段检查（C1-C5）、警报分级 | ✅ |
+| P1.3 | `src/system/tracker.ts` — 问题追踪生成器 | 待编译队列、最近完成 | ✅ |
+| P1.4 | `src/system/refresh.ts` — before_agent_start 刷新 | 每次会话启动自动刷新三个页面 | ✅ |
+| P1.5 | 环境变量已设置 (`OBSIDIAN_LLM_WIKI_KEY`) | | ✅ |
 
 ### P2 — 工作流闭环（3/4 完成）
 
