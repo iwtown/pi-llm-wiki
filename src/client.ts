@@ -10,6 +10,9 @@ interface ApiError {
   message?: string;
 }
 
+// Allow self-signed HTTPS certs for local Obsidian API plugin
+process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
+
 async function request<T = unknown>(
   method: string,
   path: string,
@@ -89,7 +92,7 @@ export async function deleteFile(filePath: string): Promise<void> {
   await request("DELETE", `/vault/${filePath}`);
 }
 
-/** Search the vault (full-text) */
+/** Search the vault (full-text) — POST with plain text body */
 export interface SearchResult {
   filename: string;
   score: number;
@@ -100,12 +103,17 @@ export async function search(
   query: string,
   limit = 20
 ): Promise<SearchResult[]> {
-  const params = new URLSearchParams({ query, contextLength: "200" });
-  const res = await request<SearchResult[]>(
-    "GET",
-    `/search/simple/?${params.toString()}`
-  );
-  return (res ?? []).slice(0, limit);
+  try {
+    const res = await request<SearchResult[]>(
+      "POST",
+      "/search/simple/",
+      query,
+      "text/plain"
+    );
+    return (res ?? []).slice(0, limit);
+  } catch {
+    return [];
+  }
 }
 
 /* ───────── Smart Connections semantic search ───────── */
@@ -117,54 +125,17 @@ export interface SmartSearchResult {
   breadcrumbs: string;
 }
 
-async function smartRequest<T = unknown>(
-  method: string,
-  path: string,
-  body?: object
-): Promise<T> {
-  const url = `${LLM_WIKI.smartApi}${path}`;
-  const headers: Record<string, string> = {
-    Authorization: `Bearer ${LLM_WIKI.smartKey}`,
-    "Content-Type": "application/json",
-  };
-
-  const res = await fetch(url, {
-    method,
-    headers,
-    body: body ? JSON.stringify(body) : undefined,
-    signal: AbortSignal.timeout(15_000),
-  });
-
-  if (!res.ok) {
-    let msg = `${res.status} ${res.statusText}`;
-    try {
-      const err = (await res.json()) as ApiError;
-      if (err.message) msg = err.message;
-    } catch {
-      // non-JSON response
-    }
-    throw new Error(`Smart Search API ${method} ${path}: ${msg}`);
-  }
-
-  const text = await res.text();
-  if (!text) return undefined as T;
-  try {
-    return JSON.parse(text) as T;
-  } catch {
-    return text as unknown as T;
-  }
-}
-
-/** Semantic search via Smart Connections */
+/** Semantic search via Smart Connections (POST JSON, /search/smart) */
 export async function smartSearch(
   query: string,
   limit = 10
 ): Promise<SmartSearchResult[]> {
   try {
-    const res = await smartRequest<{ results: SmartSearchResult[] }>(
+    const res = await request<{ results: SmartSearchResult[] }>(
       "POST",
       "/search/smart",
-      { query, limit }
+      JSON.stringify({ query, limit }),
+      "application/json"
     );
     return (res.results ?? []).slice(0, limit);
   } catch {
