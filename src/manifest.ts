@@ -5,6 +5,9 @@
 
 import { readFile, writeFile } from "./client";
 import { PATHS } from "./config";
+import { parseFrontmatter } from "./system/parse";
+
+export { parseFrontmatter };
 
 export interface SessionStatus {
   path: string; // relative path in vault, e.g. raw/sessions/Pi-Agent/2026-06-05-foo.md
@@ -13,25 +16,6 @@ export interface SessionStatus {
   linted: boolean;
   title?: string;
   project?: string;
-}
-
-/** Parse YAML frontmatter from markdown text */
-export function parseFrontmatter(md: string): Record<string, unknown> {
-  const match = md.match(/^---\n([\s\S]*?)\n---/);
-  if (!match) return {};
-  const yaml = match[1];
-  const result: Record<string, unknown> = {};
-  for (const line of yaml.split("\n")) {
-    const kv = line.match(/^(\w[\w-]*):\s*(.*)$/);
-    if (kv) {
-      const key = kv[1];
-      let val: unknown = kv[2].trim();
-      if (val === "true") val = true;
-      else if (val === "false") val = false;
-      result[key] = val;
-    }
-  }
-  return result;
 }
 
 /** Update frontmatter in markdown text */

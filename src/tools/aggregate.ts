@@ -11,6 +11,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { LLM_WIKI } from "../config";
 import { collectWikiPages, type WikiPage } from "../system/analyzer";
+import { parseFrontmatter } from "../system/parse";
 
 const VAULT = LLM_WIKI.vault;
 
@@ -128,13 +129,4 @@ export async function aggregate(
   };
 }
 
-function parseFrontmatter(md: string): Record<string, string> {
-  const match = md.match(/^---\n([\s\S]*?)\n---/);
-  if (!match) return {};
-  const result: Record<string, string> = {};
-  for (const line of match[1].split("\n")) {
-    const kv = line.match(/^([\w-]+):\s*"?(.+?)"?\s*$/);
-    if (kv) result[kv[1]] = kv[2];
-  }
-  return result;
-}
+

@@ -7,6 +7,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { LLM_WIKI } from "../config";
+import { parseFrontmatter } from "./parse";
 
 const VAULT = LLM_WIKI.vault;
 
@@ -31,17 +32,6 @@ function safeReadFile(filePath: string): string {
   try { return fs.readFileSync(filePath, "utf-8"); } catch { return ""; }
 }
 
-function parseFrontmatter(md: string): Record<string, string> {
-  const match = md.match(/^---\n([\s\S]*?)\n---/);
-  if (!match) return {};
-  const result: Record<string, string> = {};
-  for (const line of match[1].split("\n")) {
-    const kv = line.match(/^([\w-]+):\s*"?(.+?)"?\s*$/);
-    if (kv) result[kv[1]] = kv[2];
-  }
-  return result;
-}
-
 // ---- Wiki page collection ----
 
 /** Collect all wiki pages from the vault */
@@ -61,8 +51,8 @@ export function collectWikiPages(): WikiPage[] {
         const body = content.replace(/^---\n[\s\S]*?\n---\n?/, "").trim();
         pages.push({
           path: relPath,
-          title: fm.title ?? entry.replace(".md", ""),
-          project: fm.project,
+          title: typeof fm.title === "string" ? fm.title : entry.replace(".md", ""),
+          project: typeof fm.project === "string" ? fm.project : undefined,
           body,
           content,
         });

@@ -102,9 +102,9 @@ b: 2
 ---`;
     const updated = updateFrontmatter(md, { b: 3, c: 4 });
     const fm = parseFrontmatter(updated);
-    assert.equal(fm.a, "1");
-    assert.equal(fm.b, "3");
-    assert.equal(fm.c, "4");
+    assert.equal(fm.a, 1);
+    assert.equal(fm.b, 3);
+    assert.equal(fm.c, 4);
   });
 });
 

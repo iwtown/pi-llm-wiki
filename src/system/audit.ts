@@ -7,6 +7,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { LLM_WIKI, PATHS } from "../config";
+import { parseFrontmatter } from "./parse";
 
 const VAULT = LLM_WIKI.vault;
 
@@ -18,19 +19,6 @@ function safeReadDir(dir: string): string[] {
 
 function safeReadFile(filePath: string): string {
   try { return fs.readFileSync(filePath, "utf-8"); } catch { return ""; }
-}
-
-function parseFrontmatter(md: string): Record<string, boolean | string> {
-  const match = md.match(/^---\n([\s\S]*?)\n---/);
-  if (!match) return {};
-  const result: Record<string, boolean | string> = {};
-  for (const line of match[1].split("\n")) {
-    const kv = line.match(/^(\w[\w-]*):\s*(.*)$/);
-    if (!kv) continue;
-    const v = kv[2].trim();
-    result[kv[1]] = v === "true" ? true : v === "false" ? false : v;
-  }
-  return result;
 }
 
 interface RawFile {
