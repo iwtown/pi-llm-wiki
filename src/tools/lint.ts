@@ -197,6 +197,26 @@ export async function lint(
     });
   }
 
+  // P-4: Pipeline recovery — compiled but not weaved
+  const pipelineStuck: string[] = [];
+  for (const [fp, content] of allContents) {
+    if (!fp.startsWith(PATHS.rawSessions)) continue;
+    const compiled = /compiled:\s*true/.test(content);
+    const weaved = /weaved:\s*true/.test(content);
+    const linted = /linted:\s*true/.test(content);
+    if (compiled && !weaved) {
+      pipelineStuck.push(fp);
+    }
+  }
+  if (pipelineStuck.length > 0) {
+    issues.push({
+      type: "missing_frontmatter",
+      path: PATHS.rawSessions,
+      message: `管线卡滞: ${pipelineStuck.length} 个 session 已编译但未织入，建议执行 obs-weave`,
+      severity: pipelineStuck.length > 10 ? "error" : "warning",
+    });
+  }
+
   // Auto-fix: mark stale pages
   const fixed: string[] = [];
   if (params.fix) {

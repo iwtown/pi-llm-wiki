@@ -10,7 +10,9 @@ import { readFile, writeFile, appendToFile } from "../client";
 import { markCompiled } from "../manifest";
 import { PATHS, WIKI_TYPES } from "../config";
 import { detectProject } from "../project";
-import { collectWikiPages, detectKnowledgeUpgrade } from "../system/analyzer";
+import { collectWikiPages, detectKnowledgeUpgrade, textSimilarity } from "../system/analyzer";
+
+const DEDUP_THRESHOLD = 0.3;
 
 export interface CompileResult {
   rawPath: string;
@@ -18,6 +20,7 @@ export interface CompileResult {
   wikiType: string;
   linkedTo: string[];
   insights: string[];
+  dedupSuggestion?: string;
   upgrades?: { insight: string; projectCount: number; suggestedTarget: string }[];
 }
 
@@ -50,6 +53,24 @@ export async function compile(
   const title = titleMatch?.[1] ?? rawPath.split("/").pop()!.replace(".md", "");
   const dateMatch = frontmatter.match(/date:\s*(\S+)\s*$/m);
   const date = dateMatch?.[1] ?? new Date().toISOString().split("T")[0];
+
+  // P-3: Pre-compile dedup — check if similar wiki page already exists
+  const allPages = collectWikiPages();
+  const similar = allPages
+    .map((p) => ({ page: p, sim: textSimilarity(title, p.title) }))
+    .filter(({ sim }) => sim > DEDUP_THRESHOLD)
+    .sort((a, b) => b.sim - a.sim);
+  if (similar.length > 0) {
+    const top = similar[0];
+    return {
+      rawPath,
+      wikiPath: top.page.path,
+      wikiType: top.page.path.split("/")[1] ?? "发现",
+      linkedTo: [],
+      insights: [],
+      dedupSuggestion: `⚠️ 已有相似页面 [[${top.page.path}]] (相似度 ${(top.sim * 100).toFixed(0)}%)，建议使用 obs-weave 织入而非创建新页面。`,
+    } as CompileResult;
+  }
 
   // Determine wiki type
   const wikiType = params.wikiType ?? "发现";
@@ -134,7 +155,6 @@ ${linkLines || "暂无关联"}
     .slice(0, 5);
 
   // P4.1: Detect knowledge upgrade candidates
-  const allPages = collectWikiPages();
   const upgrades = detectKnowledgeUpgrade(insightLines, projectName, allPages);
   const upgradeNotes: string[] = [];
   if (upgrades.length > 0) {

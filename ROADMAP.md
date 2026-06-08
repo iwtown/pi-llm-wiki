@@ -1,6 +1,6 @@
 # pi-llm-wiki 开发计划书
 
-> 版本：`v1.4.0`（P0-P3 ✅，P4 知识进化待实施）  
+> 版本：`v1.5.0`（P0-P4 ✅，P5 长期维护待实施）  
 > 详细优化计划见 `OPTIMIZATION_PLAN.md`
 > 位置：`~/projects/.dotfiles/modules/pi-llm-wiki/`（dotfiles submodule）  
 > 依赖：Obsidian Local REST API (`localhost:27126`) + `pi-observational-memory`
@@ -127,11 +127,11 @@ recall tool                     →    obs_ingest (LLM 手动调用)
 
 | # | 任务 | 对应规则 | 状态 |
 |---|------|---------|------|
-| P4.1 | obs_compile 知识升级检测（2+ 项目→全局） | §7.2 | ⏸️ 延后（需本地 embedding） |
-| P4.2 | obs_lint 矛盾检测（同主题多版本） | §7.2 | ⬜ |
-| P4.3 | obs_lint 重复内容检测（Jaccard） | §7.2 | ⬜ |
-| P-3 | obs_compile 编译前查重（新增） | — | ⬜ |
-| P-4 | 管线失败恢复（新增） | — | ⬜ |
+| P4.1 | obs_compile 知识升级检测（2+ 项目→全局） | §7.2 | ✅ |
+| P4.2 | obs_lint 矛盾检测（同主题多版本） | §7.2 | ✅ |
+| P4.3 | obs_lint 重复内容检测（Jaccard） | §7.2 | ✅ |
+| P-3 | obs_compile 编译前查重 | — | ✅ |
+| P-4 | 管线失败恢复 | — | ✅ |
 
 > 详细计划和审核见 `OPTIMIZATION_PLAN.md` 和 `AUDIT_PLAN.md`。
 

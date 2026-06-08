@@ -136,6 +136,14 @@ export default function (pi: ExtensionAPI) {
           details: { error: "file not found or invalid format" },
         };
       }
+
+      // P-3: Dedup suggestion — similar page already exists
+      if (result.dedupSuggestion) {
+        return {
+          content: [{ type: "text", text: result.dedupSuggestion }],
+          details: result,
+        };
+      }
       const linkedList = result.linkedTo.map((l) => `  - [[${l}]]`).join("\n");
       const insightsLine =
         result.insights.length > 0
