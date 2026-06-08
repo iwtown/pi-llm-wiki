@@ -115,7 +115,7 @@ Agent 调用 obs_query
 
 | 缺失 | 影响 | 优先级 |
 |------|------|:--:|
-| obs_query 未接入 Smart Connections | Agent 搜不到语义相关的内容 | 🟡 |
+| obs_query 未接入 Smart Connections | ✅ 已修复 — 集成 /search/smart | 🟢 |
 | Graph View 无颜色 | 77 节点不易导航 | 🟢 |
 | 无"最近更新"便捷入口 | 不知道哪些页面刚被编译 | 🟢 |
 
@@ -176,21 +176,21 @@ Agent 调用 obs_query
 | F4 | Smart Connections 手动触发初始索引 | 避免首次使用时卡顿 |
 | F5 | Dataview 日期格式 + task 跟踪 | 虽然是 0 config 但可优化 |
 
-### 中期（P4 知识进化）
+### 中期（P4 知识进化）— 全部已完成 ✅
 
-| # | 任务 |
-|---|------|
-| P-3 | obs_compile 编译前查重 |
-| P4.3 | obs_lint 重复内容检测 (Jaccard) |
-| P4.2 | obs_lint 矛盾检测 |
-| P-4 | 管线失败恢复 (compile 成功但 weave 失败) |
+| # | 任务 | 状态 |
+|---|------|------|
+| P-3 | obs_compile 编译前查重 | ✅ src/tools/compile.ts |
+| P4.3 | obs_lint 重复内容检测 (Jaccard) | ✅ src/tools/lint.ts + analyzer.ts |
+| P4.2 | obs_lint 矛盾检测 | ✅ src/tools/lint.ts + analyzer.ts |
+| P-4 | 管线失败恢复 | ✅ src/system/recovery.ts |
 
-### 长期
+### 长期 — 全部已完成 ✅
 
-| # | 任务 |
-|---|------|
-| G2 | obs_query 接入 Smart Connections 语义搜索 |
-| P4.1 | 知识升级检测（需 embedding 基础设施） |
+| # | 任务 | 状态 |
+|---|------|------|
+| G2 | obs_query 接入 Smart Connections 语义搜索 | ✅ src/tools/query.ts + client.ts |
+| P4.1 | 知识升级检测 | ✅ src/system/analyzer.ts (多项目验证) |
 
 ---
 

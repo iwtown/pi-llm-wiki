@@ -52,6 +52,9 @@ export function updateFrontmatter(md: string, updates: Record<string, unknown>):
 export function quoteYaml(v: unknown): string {
   if (typeof v === "boolean") return String(v);
   if (typeof v === "number") return String(v);
+  if (Array.isArray(v)) {
+    return "[" + v.map(String).join(", ") + "]";
+  }
   const s = String(v);
   if (/[:#\{\}\[\],&\*\?\|<>="'!%@`]/.test(s) || s.includes("\n")) {
     return `"${s.replace(/"/g, '\\"')}"`;

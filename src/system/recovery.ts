@@ -139,7 +139,8 @@ async function recoverWeave(
     for (const targetPath of linkedTo) {
       try {
         let targetContent = await readFile(targetPath);
-        const wikiRel = s.compiledTo!.replace(/^wiki\//, "");
+        // Strip wiki/ prefix and .md extension for proper wikilink format
+        const wikiRel = s.compiledTo!.replace(/^wiki\//, "").replace(/\.md$/, "");
         const backlink = `- [[wiki/${wikiRel}]]`;
 
         // Don't add duplicate backlinks

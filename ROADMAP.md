@@ -1,6 +1,6 @@
 # pi-llm-wiki 开发计划书
 
-> 版本：`v1.6.0`（P0-P4 ✅，P5 ✅，G2 ✅）  
+> 版本：`v1.6.0`（P0-P4 ✅，P5 ✅，G1-G8 ✅，P-4 ✅）  
 > 详细优化计划见 `OPTIMIZATION_PLAN.md`
 > 位置：`~/projects/.dotfiles/modules/pi-llm-wiki/`（dotfiles submodule）  
 > 依赖：obsidian-api 插件 (`localhost:27124`) + Smart Connections + `pi-observational-memory`
