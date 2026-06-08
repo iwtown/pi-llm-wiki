@@ -1,12 +1,13 @@
 # pi-llm-wiki 开发计划书
 
-> 版本：`v1.6.0`（P0-P5 ✅，全 ROADMAP 完成）  
+> 版本：`v1.4.0`（P0-P3 ✅，P4 知识进化待实施）  
+> 详细优化计划见 `OPTIMIZATION_PLAN.md`
 > 位置：`~/projects/.dotfiles/modules/pi-llm-wiki/`（dotfiles submodule）  
 > 依赖：Obsidian Local REST API (`localhost:27126`) + `pi-observational-memory`
 
 ---
 
-## 一、当前版本确认（v1.1.0-dev）
+## 一、当前版本确认（v1.4.0）
 
 ### 安装验证
 
