@@ -51,7 +51,7 @@ export default function (pi: ExtensionAPI) {
     parameters: Type.Object({
       query: Type.String({ description: "Search query." }),
       scope: Type.Optional(
-        Type.String({ description: "Scope: 'all', 'wiki', 'raw', or vault name." })
+        Type.String({ description: "Scope: 'all', 'wiki', 'raw', 'zinbox', or vault name." })
       ),
       limit: Type.Optional(
         Type.Number({ description: "Max results (default: 3)." })

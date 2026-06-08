@@ -24,6 +24,8 @@ export const LLM_WIKI = {
   vault: "/mnt/d/DB/Obsidian/LLM-Wiki",
   /** Windows path (for Obsidian CLI / URI) */
   vaultWindows: "D:\\DB\\Obsidian\\LLM-Wiki",
+  /** External clipping vault (ZInBox) — search-only, no copy */
+  zinbox: "/mnt/d/DB/Obsidian/ZInBox",
 };
 
 const HOME = process.env.HOME ?? "/home";

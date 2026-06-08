@@ -6,7 +6,11 @@
 
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { search, smartSearch, readFile, appendToFile } from "../client";
-import { QUERY_DEFAULT_LIMIT, PATHS } from "../config";
+import { QUERY_DEFAULT_LIMIT, PATHS, LLM_WIKI } from "../config";
+
+import * as fs from "node:fs";
+import * as path from "node:path";
+import { execSync } from "node:child_process";
 
 interface QueryResult {
   title: string;
@@ -14,7 +18,7 @@ interface QueryResult {
   snippet: string;
   score: number;
   tags?: string[];
-  source?: "atlas" | "search" | "semantic";
+  source?: "atlas" | "search" | "semantic" | "zinbox";
 }
 
 /** Parse YAML frontmatter tags from a markdown string */
@@ -152,8 +156,47 @@ export async function query(
   }
   } // end scope !== "raw"
 
+  // ── ZInBox external vault search (runs even in "brief" mode) ──
+  const zinboxResults: QueryResult[] = [];
+  if ((scope === "all" || scope === "zinbox") && atlasResults.length < limit) {
+    const zinboxRemaining = limit - atlasResults.length;
+    const zinboxDir = LLM_WIKI.zinbox;
+    const safeQuery = queryStr.replace(/"/g, '\\"');
+    let grepOut = "";
+    try {
+      grepOut = execSync(
+        `grep -srl -i --include='*.md' "${safeQuery}" "${zinboxDir}"`,
+        { timeout: 8000, encoding: "utf-8", maxBuffer: 1024 * 512 }
+      ).trim();
+    } catch (e: any) {
+      if (e.status === 1) { grepOut = ""; } else if (e.stdout) { grepOut = e.stdout.toString().trim(); }
+    }
+    if (grepOut) {
+      const files = grepOut.split("\n").filter(Boolean).slice(0, zinboxRemaining);
+      for (const f of files) {
+        const rel = path.relative(zinboxDir, f);
+        zinboxResults.push({
+          title: rel.replace(/^.*[\\\/]/, "").replace(/\.md$/, ""),
+          path: `zinbox://${rel}`,
+          snippet: "",
+          score: 1,
+          source: "zinbox" as const,
+        });
+      }
+    }
+  }
+
+  // Merge ZInBox results into atlasResults (dedup by path)
+  const seen = new Set(atlasResults.map((r) => r.path));
+  for (const r of zinboxResults) {
+    if (!seen.has(r.path) && atlasResults.length + 1 <= limit) {
+      seen.add(r.path);
+      atlasResults.push(r);
+    }
+  }
+
   // Step 2: Semantic search via Smart Connections (G2)
-  // Skip search for "brief" — return atlas results as-is
+  // Skip search for "brief" — return atlas+zinbox results as-is
   if (depth === "brief" || atlasResults.length >= limit) {
     return atlasResults.slice(0, limit);
   }
@@ -233,7 +276,6 @@ export async function query(
   });
 
   // Merge: atlas results first (higher trust), then search, deduplicate by path
-  const seen = new Set(atlasResults.map((r) => r.path));
   const merged = [...atlasResults];
   for (const r of scopedSearch) {
     if (!seen.has(r.path) && merged.length < limit) {
