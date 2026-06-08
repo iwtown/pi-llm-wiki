@@ -108,6 +108,71 @@ export async function search(
   return (res ?? []).slice(0, limit);
 }
 
+/* ───────── Smart Connections semantic search ───────── */
+
+export interface SmartSearchResult {
+  path: string;
+  text: string;
+  score: number;
+  breadcrumbs: string;
+}
+
+async function smartRequest<T = unknown>(
+  method: string,
+  path: string,
+  body?: object
+): Promise<T> {
+  const url = `${LLM_WIKI.smartApi}${path}`;
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${LLM_WIKI.smartKey}`,
+    "Content-Type": "application/json",
+  };
+
+  const res = await fetch(url, {
+    method,
+    headers,
+    body: body ? JSON.stringify(body) : undefined,
+    signal: AbortSignal.timeout(15_000),
+  });
+
+  if (!res.ok) {
+    let msg = `${res.status} ${res.statusText}`;
+    try {
+      const err = (await res.json()) as ApiError;
+      if (err.message) msg = err.message;
+    } catch {
+      // non-JSON response
+    }
+    throw new Error(`Smart Search API ${method} ${path}: ${msg}`);
+  }
+
+  const text = await res.text();
+  if (!text) return undefined as T;
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    return text as unknown as T;
+  }
+}
+
+/** Semantic search via Smart Connections */
+export async function smartSearch(
+  query: string,
+  limit = 10
+): Promise<SmartSearchResult[]> {
+  try {
+    const res = await smartRequest<{ results: SmartSearchResult[] }>(
+      "POST",
+      "/search/smart",
+      { query, limit }
+    );
+    return (res.results ?? []).slice(0, limit);
+  } catch {
+    // Smart Search unavailable, return empty
+    return [];
+  }
+}
+
 /** Check if a file exists */
 export async function exists(filePath: string): Promise<boolean> {
   try {

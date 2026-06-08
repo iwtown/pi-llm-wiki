@@ -5,7 +5,7 @@
  */
 
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { search, readFile } from "../client";
+import { search, smartSearch, readFile } from "../client";
 import { QUERY_DEFAULT_LIMIT, PATHS } from "../config";
 
 interface QueryResult {
@@ -14,7 +14,7 @@ interface QueryResult {
   snippet: string;
   score: number;
   tags?: string[];
-  source?: "atlas" | "search";
+  source?: "atlas" | "search" | "semantic";
 }
 
 /** Parse YAML frontmatter tags from a markdown string */
@@ -144,7 +144,7 @@ export async function query(
     // Atlas unavailable, fall through to search
   }
 
-  // Step 2: Full-text search via REST API for remaining slots
+  // Step 2: Semantic search via Smart Connections (G2)
   // Skip search for "brief" — return atlas results as-is
   if (depth === "brief" || atlasResults.length >= limit) {
     return atlasResults.slice(0, limit);
@@ -152,33 +152,70 @@ export async function query(
 
   const remaining = limit - atlasResults.length;
   let searchResults: QueryResult[] = [];
+
+  // 2a: Try semantic search first
   try {
-    const raw = await search(queryStr, remaining * 2);
-    const enriched = await Promise.all(
-      raw.map(
-        async (r) => {
-          const result = await enrichResult(
-            r.filename,
-            r.matches?.[0]?.context?.slice(0, 200) ?? "",
-            r.score,
-          );
-          // full: fetch body content
-          if (depth === "full") {
-            try {
-              const body = await readFile(r.filename);
-              const bodyText = body.replace(/^---\n[\s\S]*?\n---\n?/, "").trim();
-              result.snippet = bodyText.slice(0, 500);
-            } catch {
-              // keep existing snippet
+    const smartRaw = await smartSearch(queryStr, remaining * 2);
+    if (smartRaw.length > 0) {
+      const enriched = await Promise.all(
+        smartRaw.map(
+          async (r) => {
+            const result = await enrichResult(
+              r.path,
+              r.text?.slice(0, 200) ?? "",
+              r.score,
+            );
+            result.source = "semantic";
+            // full: fetch body content
+            if (depth === "full") {
+              try {
+                const body = await readFile(r.path);
+                const bodyText = body.replace(/^---\n[\s\S]*?\n---\n?/, "").trim();
+                result.snippet = bodyText.slice(0, 500);
+              } catch {
+                // keep existing snippet
+              }
             }
+            return result;
           }
-          return result;
-        }
-      )
-    );
-    searchResults = enriched.map((r) => ({ ...r, source: "search" as const }));
+        )
+      );
+      searchResults = enriched;
+    }
   } catch {
-    // search unavailable
+    // Smart search unavailable, fall through to simple search
+  }
+
+  // 2b: Fallback to full-text search if semantic search returns nothing
+  if (searchResults.length === 0) {
+    try {
+      const raw = await search(queryStr, remaining * 2);
+      const enriched = await Promise.all(
+        raw.map(
+          async (r) => {
+            const result = await enrichResult(
+              r.filename,
+              r.matches?.[0]?.context?.slice(0, 200) ?? "",
+              r.score,
+            );
+            // full: fetch body content
+            if (depth === "full") {
+              try {
+                const body = await readFile(r.filename);
+                const bodyText = body.replace(/^---\n[\s\S]*?\n---\n?/, "").trim();
+                result.snippet = bodyText.slice(0, 500);
+              } catch {
+                // keep existing snippet
+              }
+            }
+            return result;
+          }
+        )
+      );
+      searchResults = enriched.map((r) => ({ ...r, source: "search" as const }));
+    } catch {
+      // search unavailable
+    }
   }
 
   // Merge: atlas results first (higher trust), then search, deduplicate by path

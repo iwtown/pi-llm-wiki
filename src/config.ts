@@ -13,11 +13,24 @@ function getApiKey(): string {
   return key;
 }
 
+function getSmartKey(): string {
+  const key = process.env.OBSIDIAN_LLM_WIKI_SMART_KEY;
+  if (!key) {
+    // fallback: same as main key (shared config)
+    return getApiKey();
+  }
+  return key;
+}
+
 export const LLM_WIKI = {
-  /** Obsidian REST API endpoint (WSL2 mirrored networking) */
+  /** Obsidian REST API endpoint (local-rest-api, WSL2 mirrored networking) */
   api: "http://localhost:27126",
   /** Bearer token for REST API */
   get key() { return getApiKey(); },
+  /** Smart Search API endpoint (obsidian-api plugin, HTTPS) */
+  smartApi: "https://localhost:27124",
+  /** Smart Search API key */
+  get smartKey() { return getSmartKey(); },
   /** WSL2 filesystem path to vault */
   vault: "/mnt/d/DB/Obsidian/LLM-Wiki",
   /** Windows path (for Obsidian CLI / URI) */
