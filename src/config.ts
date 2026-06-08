@@ -69,3 +69,13 @@ export const QUERY_DEFAULT_LIMIT = 3;
 
 /** Days before marking content as stale */
 export const STALE_DAYS = 90;
+
+/** Cross-page analysis thresholds */
+export const ANALYSIS = {
+  /** Report concepts referenced ≥N times but lacking a page */
+  MISSING_CONCEPT_THRESHOLD: 3,
+  /** Jaccard similarity threshold for finding related pages during weave */
+  WEAVE_RELEVANCE_THRESHOLD: 0.2,
+  /** Max pages to touch in one weave pass */
+  WEAVE_MAX_CONTACTS: 10,
+} as const;

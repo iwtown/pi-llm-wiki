@@ -7,7 +7,8 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { readFile, writeFile } from "../client";
 import { markWeaved } from "../manifest";
-import { PATHS } from "../config";
+import { PATHS, ANALYSIS } from "../config";
+import { collectWikiPages, findRelatedPages } from "../system/analyzer";
 
 export interface WeaveResult {
   updatedPages: string[];
@@ -77,6 +78,48 @@ export async function weave(
     await markWeaved(rawPath);
   } catch {
     // non-fatal
+  }
+
+  // B1: Deep weave — scan for related pages beyond linkedTo, up to WEAVE_MAX_CONTACTS total
+  const contactsRemaining = Math.max(0, ANALYSIS.WEAVE_MAX_CONTACTS - updatedPages.length);
+  if (contactsRemaining > 0 && insights.length > 0) {
+    try {
+      const allPages = collectWikiPages();
+      const related = findRelatedPages(allPages, insights, {
+        threshold: ANALYSIS.WEAVE_RELEVANCE_THRESHOLD,
+        maxResults: contactsRemaining,
+        excludePaths: [...linkedTo, wikiPath],
+      });
+
+      const date = new Date().toISOString().split("T")[0];
+      for (const page of related) {
+        try {
+          const content = await readFile(page.path);
+          let updated = content;
+
+          // Add experience log section if missing
+          if (!content.includes("## 📋 经验日志")) {
+            updated += "\n\n## 📋 经验日志\n\n";
+          }
+
+          // Append related entry
+          const logEntry = `- [${date}] 关联 [[${wikiPath}]] — 语义相关 (来自 ${insights.slice(0, 2).join(", ")})`;
+          if (!content.includes(`[[${wikiPath}]]`)) {
+            updated = updated.replace(
+              /(## 📋 经验日志\n)/,
+              `$1${logEntry}\n`
+            );
+          }
+
+          await writeFile(page.path, updated);
+          updatedPages.push(page.path);
+        } catch (e: any) {
+          errors.push(`${page.path} (deep): ${e.message}`);
+        }
+      }
+    } catch {
+      // non-fatal — deep weave is best-effort
+    }
   }
 
   return { updatedPages, errors };

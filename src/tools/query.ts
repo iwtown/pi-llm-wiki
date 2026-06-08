@@ -5,7 +5,7 @@
  */
 
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { search, smartSearch, readFile } from "../client";
+import { search, smartSearch, readFile, appendToFile } from "../client";
 import { QUERY_DEFAULT_LIMIT, PATHS } from "../config";
 
 interface QueryResult {
@@ -240,6 +240,18 @@ export async function query(
       seen.add(r.path);
       merged.push(r);
     }
+  }
+
+  // Log query to log.md (best-effort)
+  const date = new Date().toISOString().split("T")[0];
+  const resultCount = merged.length;
+  try {
+    await appendToFile(
+      PATHS.log,
+      `## [${date}] query | "${queryStr.slice(0, 60)}" → ${resultCount} 条结果 (${scope}, ${depth})`
+    );
+  } catch {
+    // non-fatal
   }
 
   return merged.slice(0, limit);

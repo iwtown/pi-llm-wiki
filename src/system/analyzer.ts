@@ -186,6 +186,118 @@ export interface DuplicateGroup {
   similarity: number;
 }
 
+// ---- Missing concept detection (K1) ----
+
+export interface MissingConcept {
+  /** The wikilink reference (normalized) */
+  concept: string;
+  /** How many pages reference it */
+  refCount: number;
+  /** Example pages that reference it */
+  referredBy: string[];
+}
+
+/**
+ * Find concepts referenced by [[wikilinks]] but lacking a corresponding page.
+ * Normalizes all wikilink variants: [[path|alias]], [[path#section]], etc.
+ * Excludes system pages (kind: system) and index pages (wiki/索引/).
+ */
+export function detectMissingConcepts(
+  allPages: WikiPage[],
+  threshold = 3
+): MissingConcept[] {
+  // Build sets of existing page paths and titles for fast lookup
+  const existingPaths = new Set<string>();
+  const existingTitles = new Set<string>();
+  const systemOrIndex = new Set<string>();
+
+  for (const page of allPages) {
+    const relPath = page.path.replace(/\.md$/, "");
+    existingPaths.add(relPath);
+    existingPaths.add(page.title);
+    existingTitles.add(page.title);
+
+    // Track system/index pages to exclude their references
+    const isSystem =
+      page.content.includes("kind: system") ||
+      page.path.startsWith("wiki/索引/");
+    if (isSystem) {
+      systemOrIndex.add(relPath);
+    }
+  }
+
+  // Scan all NON-system pages for wikilinks
+  const refCount = new Map<string, { count: number; refs: string[] }>();
+
+  for (const page of allPages) {
+    const relPath = page.path.replace(/\.md$/, "");
+    if (systemOrIndex.has(relPath)) continue; // skip system/index
+
+    // Find all [[wikilinks]] — handle variants
+    const linkMatches = page.content.matchAll(/\[\[([^\]]+)\]\]/g);
+    for (const m of linkMatches) {
+      let link = m[1];
+      // Normalize: strip |alias and #section/^block
+      link = link.replace(/(\|[^\]]+)?(#[^\]]+)?$/, "").trim();
+      if (!link || link.includes("://")) continue;
+
+      // Check if target page exists
+      const linkPath = link.replace(/\.md$/, "");
+      if (existingPaths.has(linkPath)) continue;
+      if (existingTitles.has(link)) continue;
+
+      // Count missing reference
+      const entry = refCount.get(link) ?? { count: 0, refs: [] };
+      entry.count++;
+      if (entry.refs.length < 5) entry.refs.push(page.path);
+      refCount.set(link, entry);
+    }
+  }
+
+  // Filter by threshold and sort descending
+  return [...refCount.entries()]
+    .filter(([, v]) => v.count >= threshold)
+    .sort((a, b) => b[1].count - a[1].count)
+    .map(([concept, v]) => ({
+      concept,
+      refCount: v.count,
+      referredBy: v.refs,
+    }));
+}
+
+/**
+ * Find pages related to a set of insights, for deep weave contact expansion.
+ * Returns up to maxResults pages sorted by relevance descending.
+ * Excludes pages already in excludePaths.
+ */
+export function findRelatedPages(
+  allPages: WikiPage[],
+  insights: string[],
+  options: { threshold?: number; maxResults?: number; excludePaths?: string[] } = {}
+): WikiPage[] {
+  const threshold = options.threshold ?? 0.2;
+  const maxResults = options.maxResults ?? 5;
+  const exclude = new Set(options.excludePaths ?? []);
+
+  if (insights.length === 0) return [];
+
+  // Combine insights into a single search key
+  const searchKey = insights.join(" ").slice(0, 500);
+
+  // Score each page by title+body similarity to insights
+  const scored = allPages
+    .filter((p) => !exclude.has(p.path)) // skip already-linked pages
+    .map((p) => ({
+      page: p,
+      score: textSimilarity(searchKey, p.title + " " + p.body.slice(0, 300)),
+    }))
+    .filter(({ score }) => score >= threshold)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, maxResults);
+
+  return scored.map((s) => s.page);
+}
+
 /** Find pairs of wiki pages with high content similarity (>70%) */
 export function detectDuplicates(allPages: WikiPage[], threshold = 0.7): DuplicateGroup[] {
   const duplicates: DuplicateGroup[] = [];

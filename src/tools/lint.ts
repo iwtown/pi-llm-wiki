@@ -6,12 +6,12 @@
  */
 
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { listDir, readFile, writeFile } from "../client";
+import { listDir, readFile, writeFile, appendToFile } from "../client";
 import { PATHS, STALE_DAYS } from "../config";
-import { collectWikiPages, detectContradictions, detectDuplicates } from "../system/analyzer";
+import { collectWikiPages, detectContradictions, detectDuplicates, detectMissingConcepts } from "../system/analyzer";
 
 export interface LintIssue {
-  type: "orphan" | "stale" | "broken_link" | "missing_frontmatter" | "duplicate" | "pipeline_stuck";
+  type: "orphan" | "stale" | "broken_link" | "missing_frontmatter" | "duplicate" | "pipeline_stuck" | "missing_concept";
   path: string;
   message: string;
   severity: "error" | "warning" | "info";
@@ -186,6 +186,17 @@ export async function lint(
     });
   }
 
+  // K1: Missing concept detection — concepts referenced ≥3 times but lacking pages
+  const missingConcepts = detectMissingConcepts(allPagesArr);
+  for (const mc of missingConcepts) {
+    issues.push({
+      type: "missing_concept",
+      path: mc.referredBy[0],
+      message: `概念 "${mc.concept}" 在 ${mc.refCount} 个页面中被引用但无对应页面 (例如: ${mc.referredBy.slice(0, 3).join(", ")})`,
+      severity: "warning",
+    });
+  }
+
   // P4.3: Duplicate content detection — pages with >70% similarity
   const dupes = detectDuplicates(allPagesArr, 0.7);
   for (const d of dupes) {
@@ -259,6 +270,17 @@ export async function lint(
   const errors = issues.filter((i) => i.severity === "error").length;
   const warnings = issues.filter((i) => i.severity === "warning").length;
   const info = issues.filter((i) => i.severity === "info").length;
+
+  // Log lint to log.md (best-effort)
+  const date = new Date().toISOString().split("T")[0];
+  try {
+    await appendToFile(
+      PATHS.log,
+      `## [${date}] lint | ${issues.length} 个问题 (${errors} errors, ${warnings} warnings, ${info} info)`
+    );
+  } catch {
+    // non-fatal
+  }
 
   return {
     issues,

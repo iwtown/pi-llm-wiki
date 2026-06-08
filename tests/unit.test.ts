@@ -206,6 +206,147 @@ describe("detectProject", () => {
   });
 });
 
+/* ───────── analyzer.ts (missing concept detection) ───────── */
+
+import { detectMissingConcepts } from "../src/system/analyzer";
+import type { WikiPage } from "../src/system/analyzer";
+
+describe("detectMissingConcepts", () => {
+  it("reports concepts referenced ≥3 times but lacking a page", () => {
+    const pages: WikiPage[] = [
+      {
+        path: "wiki/发现/A.md",
+        title: "A",
+        body: "Uses [[缺失概念-X]] and [[已有概念]].",
+        content: `---\ntitle: A\ntags: [wiki/发现]\n---\n
+Uses [[缺失概念-X]] and [[已有概念]].`,
+        project: "test",
+      },
+      {
+        path: "wiki/发现/B.md",
+        title: "B",
+        body: "Also uses [[缺失概念-X]] and [[缺失概念-Y]].",
+        content: `---\ntitle: B\ntags: [wiki/发现]\n---\n
+Also uses [[缺失概念-X]] and [[缺失概念-Y]].`,
+      },
+      {
+        path: "wiki/发现/C.md",
+        title: "C",
+        body: "Uses [[缺失概念-X]] and [[缺失概念-Y]] again.",
+        content: `---\ntitle: C\ntags: [wiki/发现]\n---\n
+Uses [[缺失概念-X]] and [[缺失概念-Y]] again.`,
+      },
+      {
+        path: "wiki/概念/已有概念.md",
+        title: "已有概念",
+        body: "An existing page.",
+        content: `---\ntitle: 已有概念\ntags: [wiki/概念]\n---\n
+An existing page.`,
+      },
+    ];
+
+    const missing = detectMissingConcepts(pages, 3);
+    const names = missing.map((m) => m.concept);
+    assert.ok(names.includes("缺失概念-X"), "should detect 缺失概念-X (refCount=3)");
+    // 缺失概念-Y only referenced 2 times (B, C), threshold=3 → should NOT appear
+    assert.ok(!names.includes("缺失概念-Y"), "should NOT detect 缺失概念-Y (refCount=2 < threshold=3)");
+  });
+
+  it("respects custom threshold", () => {
+    const pages: WikiPage[] = [
+      {
+        path: "wiki/发现/X.md",
+        title: "X",
+        body: "Ref [[稀有概念]].",
+        content: `---\ntitle: X\ntags: [wiki/发现]\n---\n
+Ref [[稀有概念]].`,
+      },
+      {
+        path: "wiki/发现/Y.md",
+        title: "Y",
+        body: "Also [[稀有概念]].",
+        content: `---\ntitle: Y\ntags: [wiki/发现]\n---\n
+Also [[稀有概念]].`,
+      },
+    ];
+
+    // threshold=2 should catch 稀有概念 (refCount=2)
+    const missing2 = detectMissingConcepts(pages, 2);
+    assert.equal(missing2.length, 1);
+    assert.equal(missing2[0].concept, "稀有概念");
+
+    // threshold=3 should not catch it
+    const missing3 = detectMissingConcepts(pages, 3);
+    assert.equal(missing3.length, 0);
+  });
+
+  it("handles wikilink variants (alias, section)", () => {
+    const pages: WikiPage[] = [
+      {
+        path: "wiki/发现/A.md",
+        title: "A",
+        body: "Links [[概念/缺失#章节|别名]], [[概念/其他#^block]].",
+        content: `---\ntitle: A\ntags: [wiki/发现]\n---\n
+Links [[概念/缺失#章节|别名]], [[概念/其他#^block]].`,
+      },
+      {
+        path: "wiki/发现/B.md",
+        title: "B",
+        body: "Also [[概念/缺失]] and [[概念/其他]].",
+        content: `---\ntitle: B\ntags: [wiki/发现]\n---\n
+Also [[概念/缺失]] and [[概念/其他]].`,
+      },
+      {
+        path: "wiki/发现/C.md",
+        title: "C",
+        body: "Refs [[概念/缺失]] again.",
+        content: `---\ntitle: C\ntags: [wiki/发现]\n---\n
+Refs [[概念/缺失]] again.`,
+      },
+    ];
+
+    const missing = detectMissingConcepts(pages, 3);
+    const names = missing.map((m) => m.concept);
+    assert.ok(names.includes("概念/缺失"), "should normalize alias variants (A/B/C = 3 refs)");
+    // 概念/其他: A (block ref), B (direct ref) = 2 < 3, should NOT appear
+    const other = missing.find((m) => m.concept === "概念/其他");
+    assert.equal(other, undefined, "概念/其他 should be filtered (refCount=2 < 3)");
+  });
+
+  it("excludes system pages and index pages", () => {
+    const pages: WikiPage[] = [
+      {
+        path: "wiki/仪表盘.md",
+        title: "仪表盘",
+        body: "Agent auto-generated.",
+        content: `---\ntitle: 仪表盘\nkind: system\n---\n
+Agent auto-generated.`,
+      },
+      {
+        path: "wiki/索引/发现.md",
+        title: "发现索引",
+        body: "Index page.",
+        content: `---\ntitle: 发现索引\n---\n
+Index page.`,
+      },
+      {
+        path: "wiki/发现/A.md",
+        title: "A",
+        body: "Normal page.",
+        content: `---\ntitle: A\ntags: [wiki/发现]\n---\n
+Normal page referencing [[概念/缺失概念-X]].`,
+        project: "test",
+      },
+    ];
+
+    // Only 1 non-excluded page, so even if it references a missing concept,
+    // the count is 1 < threshold 3
+    const missing = detectMissingConcepts(pages, 1);
+    assert.equal(missing.length, 1);
+    assert.equal(missing[0].concept, "概念/缺失概念-X");
+  });
+});
+
 /* ───────── client.ts (API integration) ───────── */
 
 import { search, smartSearch } from "../src/client";
