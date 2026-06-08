@@ -131,7 +131,7 @@ recall tool                     →    obs_ingest (LLM 手动调用)
 | P4.2 | obs_lint 矛盾检测（同主题多版本） | §7.2 | ✅ |
 | P4.3 | obs_lint 重复内容检测（Jaccard） | §7.2 | ✅ |
 | P-3 | obs_compile 编译前查重 | — | ✅ |
-| P-4 | 管线失败恢复 | — | ✅ |
+| P-4 | 管线失败恢复 — auto-recover 卡滞 session (src/system/recovery.ts) | — | ✅ |
 
 > 详细计划和审核见 `OPTIMIZATION_PLAN.md` 和 `AUDIT_PLAN.md`。
 

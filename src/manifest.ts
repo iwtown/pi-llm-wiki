@@ -59,13 +59,21 @@ export function quoteYaml(v: unknown): string {
   return s;
 }
 
-/** Mark a session as compiled */
-export async function markCompiled(sessionPath: string): Promise<void> {
+/** Mark a session as compiled, with optional compile target and linked pages */
+export async function markCompiled(
+  sessionPath: string,
+  options?: { compiledTo?: string; linkedTo?: string[] }
+): Promise<void> {
   const content = await readFile(sessionPath);
-  const updated = updateFrontmatter(content, {
+  const updates: Record<string, unknown> = {
     compiled: true,
     updated: new Date().toISOString().split("T")[0],
-  });
+  };
+  if (options?.compiledTo) updates.compiled_to = options.compiledTo;
+  if (options?.linkedTo && options.linkedTo.length > 0) {
+    updates.linked_to = options.linkedTo;
+  }
+  const updated = updateFrontmatter(content, updates);
   await writeFile(sessionPath, updated);
 }
 
@@ -81,6 +89,51 @@ export async function markLinted(sessionPath: string): Promise<void> {
   const content = await readFile(sessionPath);
   const updated = updateFrontmatter(content, { linted: true });
   await writeFile(sessionPath, updated);
+}
+
+/** Find sessions stuck in pipeline: compiled but not weaved or not linted */
+export async function getStuckSessions(): Promise<
+  Array<{ path: string; hasWeaved: boolean; hasLinted: boolean; compiledTo?: string; linkedTo?: string[] }>
+> {
+  const { listDir } = await import("./client");
+  const stuck: Array<{
+    path: string;
+    hasWeaved: boolean;
+    hasLinted: boolean;
+    compiledTo?: string;
+    linkedTo?: string[];
+  }> = [];
+
+  async function walk(dir: string) {
+    try {
+      const entries = await listDir(dir);
+      for (const e of entries) {
+        const full = `${dir}/${e}`;
+        if (e.endsWith(".md")) {
+          const content = await readFile(full);
+          const fm = parseFrontmatter(content);
+          if (fm.compiled === true || fm.compiled === "true") {
+            const hasWeaved = fm.weaved === true || fm.weaved === "true";
+            const hasLinted = fm.linted === true || fm.linted === "true";
+            if (!hasWeaved || !hasLinted) {
+              stuck.push({
+                path: full,
+                hasWeaved,
+                hasLinted,
+                compiledTo: fm.compiled_to as string | undefined,
+                linkedTo: Array.isArray(fm.linked_to) ? (fm.linked_to as string[]) : undefined,
+              });
+            }
+          }
+        } else if (!e.includes(".")) {
+          await walk(full);
+        }
+      }
+    } catch { /* skip */ }
+  }
+
+  await walk(PATHS.rawSessions);
+  return stuck;
 }
 
 /** Get all uncompiled session paths */

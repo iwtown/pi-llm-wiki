@@ -119,8 +119,8 @@ ${linkLines || "暂无关联"}
 
   await writeFile(wikiPath, wikiContent);
 
-  // Mark raw session as compiled
-  await markCompiled(rawPath);
+  // Mark raw session as compiled, store pipeline state for recovery
+  await markCompiled(rawPath, { compiledTo: wikiPath, linkedTo: links });
 
   // Mark task as done if raw session has Tasks checkbox
   try {

@@ -11,7 +11,7 @@ import { PATHS, STALE_DAYS } from "../config";
 import { collectWikiPages, detectContradictions, detectDuplicates } from "../system/analyzer";
 
 export interface LintIssue {
-  type: "orphan" | "stale" | "broken_link" | "missing_frontmatter" | "duplicate";
+  type: "orphan" | "stale" | "broken_link" | "missing_frontmatter" | "duplicate" | "pipeline_stuck";
   path: string;
   message: string;
   severity: "error" | "warning" | "info";
@@ -197,23 +197,43 @@ export async function lint(
     });
   }
 
-  // P-4: Pipeline recovery — compiled but not weaved
-  const pipelineStuck: string[] = [];
-  for (const [fp, content] of allContents) {
-    if (!fp.startsWith(PATHS.rawSessions)) continue;
-    const compiled = /compiled:\s*true/.test(content);
-    const weaved = /weaved:\s*true/.test(content);
-    const linted = /linted:\s*true/.test(content);
-    if (compiled && !weaved) {
-      pipelineStuck.push(fp);
+  // P-4: Pipeline recovery — scan raw sessions for compiled but not weaved/linted
+  const stuckSessions: Array<{ path: string; status: string }> = [];
+  async function scanRawSessions() {
+    async function walk(dir: string) {
+      try {
+        const entries = await listDir(dir);
+        for (const e of entries) {
+          const full = `${dir}/${e}`;
+          if (e.endsWith(".md")) {
+            try {
+              const content = await readFile(full);
+              const compiled = /compiled:\s*true/.test(content);
+              const weaved = /weaved:\s*true/.test(content);
+              const linted = /linted:\s*true/.test(content);
+              if (compiled && (!weaved || !linted)) {
+                const status = !weaved ? "已编译未织入" : "已编译未lint";
+                stuckSessions.push({ path: full, status });
+              }
+            } catch { /* skip */ }
+          } else if (!e.includes(".")) {
+            await walk(full);
+          }
+        }
+      } catch { /* skip */ }
     }
+    await walk(PATHS.rawSessions);
   }
-  if (pipelineStuck.length > 0) {
+  try {
+    await scanRawSessions();
+  } catch { /* skip */ }
+
+  for (const s of stuckSessions) {
     issues.push({
-      type: "missing_frontmatter",
-      path: PATHS.rawSessions,
-      message: `管线卡滞: ${pipelineStuck.length} 个 session 已编译但未织入，建议执行 obs-weave`,
-      severity: pipelineStuck.length > 10 ? "error" : "warning",
+      type: "pipeline_stuck",
+      path: s.path,
+      message: `管线卡滞: ${s.status}`,
+      severity: "warning",
     });
   }
 

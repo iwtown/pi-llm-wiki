@@ -1,7 +1,7 @@
 # pi-llm-wiki × Obsidian 工作流优化计划
 
 > 版本：2026-06-08（含审核修订）  
-> 状态：P0-P4 ✅ | G2 ✅ | P5 ✅ | Obsidian 配置 ✅ | 30 个单元测试 | 四文档一致
+> 状态：P0-P4 ✅ | G1-G8 ✅ | P5 ✅ | P-4 ✅ | Obsidian 配置 ✅ | 30 个单元测试 | 五文档一致
 
 ---
 
@@ -11,14 +11,14 @@
 
 | # | 盲区 | 风险 |
 |---|------|------|
-| G1 | **agent_end 无成功率监控** — `pi-llm-wiki.log` 只有 1 条记录，无法统计历史成/败 | 问题复发不会发现 |
+| G1 | ~~agent_end 无成功率监控~~ | ✅ 已实现 — dashboard 读取 slog 统计 auto_ingest_ok/fail |
 | G2 | ~~obs_query 没用 Smart Connections~~ | ✅ 已修复 — 接入 /search/smart 端点 |
-| G3 | **agent_end 每轮扫 vault 去重** — `alreadyInVault()` 遍历所有 raw/*.md，加 I/O | 每轮回复加延迟 |
-| G4 | **schema 注入失败静默** — before_agent_start 失败只打 console.error | 整场对话缺 LLM-Wiki 规则 |
-| G5 | **单轮对话也创建 raw** — "好的"/"继续" 产生无意义条目 | 噪音累积 |
-| G6 | **startup recovery 与 agent_end 可能竞态** | 轻微浪费 |
-| G7 | **obs_ingest 手动调用无去重** — 手动调两次 → 两个 raw | 重复数据 |
-| G8 | **dlog 在 /tmp/ 重启丢失** | 崩溃后丢排障日志 |
+| G3 | ~~agent_end 每轮扫 vault 去重~~ | ✅ 已修复 — 改用内存 Set (ingestedSessionIds) |
+| G4 | ~~schema 注入失败静默~~ | ✅ 已修复 — 写入 slog schema_inject_fail 事件 |
+| G5 | ~~单轮对话也创建 raw~~ | ✅ 已实现 — ≤1 条用户消息且 <200 字符自动跳过 |
+| G6 | ~~startup recovery 与 agent_end 可能竞态~~ | ✅ 已实现 — startup-recovery 钩子，内存缓存去重 |
+| G7 | ~~obs_ingest 手动调用无去重~~ | ✅ 已修复 — session_id 去重检查 |
+| G8 | ~~dlog 在 /tmp/ 重启丢失~~ | ✅ 已修复 — dlog → ~/.pi/agent/，slog 1MB 轮转 3 备份 |
 
 ### 🟡 计划中的问题
 
@@ -34,9 +34,15 @@
 ### 调整后的优先级
 
 ```
-先修盲区 G1-G8 → 再 P4.3 (重复检测) → P4.2 (矛盾检测) → P4.1 延后
-+ 新增: obs_compile 查重、管线失败恢复、slog 轮转
-- 移除: Heatmap Calendar、Juggl
+全部已实施 ✅ → 无遗留的盲区或已知计划问题
+
+已完成:
+- G1-G8 盲区修复 (全部)
+- P4.3 重复检测, P4.2 矛盾检测, P4.1 知识升级检测
+- obs_compile 查重, 管线失败恢复, slog 轮转
+- 移除: Heatmap Calendar, Juggl
+
+下一步: 见「三、可选增强」
 ```
 
 ---
@@ -120,12 +126,12 @@
 
 | # | 任务 | 改动 | 难度 |
 |---|------|------|:--:|
-| G1 | **agent_end 成功率监控** | dashboard 增加 agent_end 成功/失败计数，读 `pi-llm-wiki.log` | 低 |
-| G2 | **obs_query 接入 Smart Connections** | 搜索时判断 Obsidian 是否运行，若在则调用 Smart Connections API | 中 |
-| G3 | **agent_end 去重优化** | 用内存 cache 替代每次遍历 vault 文件系统 | 低 |
-| G4 | **schema 注入失败告警** | 失败时写入 slog 并返回 warning event，让 Agent 感知 | 低 |
-| G5 | **最短会话过滤** | agent_end: 用户消息 ≤1 条且总 content < 200 字符 → 跳过 | 低 |
-| G7 | **obs_ingest 去重** | ingest 时检查 vault 中是否已有同 session_id 的 raw | 低 |
+| G1 | agent_end 成功率监控 | ✅ 已实现 — dashboard 读取 slog | 低 |
+| G2 | obs_query 接入 Smart Connections | ✅ 已实现 — 集成 /search/smart | 中 |
+| G3 | agent_end 去重优化 | ✅ 已实现 — 内存 Set | 低 |
+| G4 | schema 注入失败告警 | ✅ 已实现 — slog schema_inject_fail | 低 |
+| G5 | 最短会话过滤 | ✅ 已实现 | 低 |
+| G7 | obs_ingest 去重 | ✅ 已实现 — session_id 匹配 | 低 |
 | G8 | **dlog 持久化** | 改为 `~/.pi/agent/pi-llm-wiki-debug.log`，重启不丢失 | 低 |
 | P-5 | **slog 轮转** | 超过 1MB 时 rotate 到 `.log.1`，保留最近 3 个 | 低 |
 
@@ -151,11 +157,17 @@
 
 **文件**：`src/tools/lint.ts`
 
-### 3.4 管线失败恢复（新增）
+### 3.4 管线失败恢复（已实现）
 
-**目标**：compile 成功但 weave 失败的 session → obs_lint 检测并标记为"半成品"。
+**目标**：compile 成功但 weave 失败的 session → 自动恢复。
 
-**文件**：`src/tools/lint.ts`
+**文件**：`src/system/recovery.ts`、`src/tools/lint.ts`、`src/system/refresh.ts`
+
+**实现**：
+- `recoverPipeline()`: 扫描 raw/sessions/ 中 `compiled=true` 但 `weaved/false` 的 session
+- 读取 wiki 页面的 backlinks，重新执行 weave
+- `before_agent_start` 自动运行恢复
+- `obs-lint` 报告管线卡滞 session
 
 ### 3.5 P4.1 知识升级检测（延后）
 
