@@ -74,11 +74,15 @@ export async function ingest(
   const projectName = project?.name ?? "unknown";
   const date = new Date().toISOString().split("T")[0];
 
-  // Build safe filename from first line + timestamp to avoid collisions
-  const firstLine = content.split("\n")[0]?.replace(/^#+\s*/, "").trim() ?? "session";
+  // Build safe filename from first meaningful line + timestamp to avoid collisions
+  // B1 fix: skip leading YAML frontmatter (---) and empty lines
+  const lines = content.split("\n").filter((l) => l.trim() && !l.trim().startsWith("---"));
+  const firstLine = (lines[0] ?? "").replace(/^#+\s*/, "").trim() || "session";
   const safeTopic = firstLine.replace(/[^a-zA-Z0-9\u4e00-\u9fff_-]/g, "-").slice(0, 50);
+  // B3 fix: ensure safeTopic is non-empty for filename
+  const safeTopicClean = safeTopic.trim() || "session";
   const time = new Date().toISOString().split("T")[1]?.replace(/:/g, "").slice(0, 6) ?? "";
-  const fileName = `${date}-${safeTopic || "session"}-${time}.md`;
+  const fileName = `${date}-${safeTopicClean}-${time}.md`;
   const vaultPath = `${PATHS.rawSessions}/${projectName}/${fileName}`;
   const fsPath = path.join(VAULT_BASE, vaultPath);
 
@@ -100,13 +104,10 @@ export async function ingest(
     } catch { /* dir may not exist yet */ }
   }
 
+  // B2 fix: template already includes Task checkbox — no need to append again
   const template = buildTemplate(firstLine, projectName, date, sessionId, content);
 
-  // Add Tasks-compatible checkbox in the raw session file
-  const taskLine = `- [ ] 编译: ${firstLine} 📅 ${date}`;
-  const templateWithTask = template + `\n${taskLine}\n`;
-
-  const writeMode = await writeWithFallback(vaultPath, fsPath, templateWithTask);
+  const writeMode = await writeWithFallback(vaultPath, fsPath, template);
   if (writeMode === "fail") {
     throw new Error(`Failed to write session to both API and filesystem: ${vaultPath}`);
   }

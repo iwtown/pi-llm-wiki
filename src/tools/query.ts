@@ -87,10 +87,17 @@ export async function query(
   ctx: ExtensionContext
 ): Promise<QueryResult[]> {
   const limit = params.limit ?? QUERY_DEFAULT_LIMIT;
+  // C1 fix: scope filtering
+  const scope = params.scope ?? "all";
 
   // Step 1: Check 图谱.md for matching pages (cheapest — §8)
+  // Skip atlas if scope is "raw" (图谱 only covers wiki/ pages)
   const depth = params.depth ?? "normal";
+
   const atlasResults: QueryResult[] = [];
+
+  // Only scan atlas for wiki or all scope
+  if (scope !== "raw") {
   try {
     const atlasContent = await readFile(PATHS.index);
     const atlasLinks = parseAtlasLinks(atlasContent);
@@ -143,6 +150,7 @@ export async function query(
   } catch {
     // Atlas unavailable, fall through to search
   }
+  } // end scope !== "raw"
 
   // Step 2: Semantic search via Smart Connections (G2)
   // Skip search for "brief" — return atlas results as-is
@@ -218,10 +226,16 @@ export async function query(
     }
   }
 
+  // C1: Filter search results by scope
+  const scopedSearch = searchResults.filter((r) => {
+    if (scope === "all") return true;
+    return r.path.startsWith(scope === "wiki" ? "wiki/" : "raw/");
+  });
+
   // Merge: atlas results first (higher trust), then search, deduplicate by path
   const seen = new Set(atlasResults.map((r) => r.path));
   const merged = [...atlasResults];
-  for (const r of searchResults) {
+  for (const r of scopedSearch) {
     if (!seen.has(r.path) && merged.length < limit) {
       seen.add(r.path);
       merged.push(r);

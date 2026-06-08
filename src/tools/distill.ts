@@ -4,7 +4,7 @@
  * Per schema Rule 7: reads the ## 📋 经验日志 section, consolidates into a
  * narrative summary, then clears the log section.
  *
- * This implements the "收敛式蒸馏" cycle: accumulate → distill → reset.
+ * This implements the "收敛式蒸馏" cycle: accumulate -> distill -> reset.
  */
 
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
@@ -58,12 +58,27 @@ export async function distill(
     return true;
   });
 
-  const summary = `## 💎 蒸馏摘要\n\n> 自动蒸馏 — ${new Date().toISOString().split("T")[0]} — 合并了 ${logCount} 条经验日志${logCount !== uniqueLines.length ? ` (去重前 ${logCount} 条)` : ""}\n\n${uniqueLines.map((l) => `- ${l}`).join("\n")}`;
+  const date = new Date().toISOString().split("T")[0];
 
-  // Replace the log section with distilled summary
+  // C2 fix: insert distilled summary section before the log, then clear the log
+  const summarySection = [
+    "",
+    "## \u{1F4D6} 蒸馏摘要",
+    "",
+    "> 自动蒸馏 \u{2014} " + date + " \u{2014} 合并了 " + logCount + " 条经验日志" +
+      (logCount !== uniqueLines.length ? " (去重前 " + logCount + " 条)" : ""),
+    "",
+    ...uniqueLines.map((l) => "- " + l),
+    "",
+  ].join("\n");
+
+  // Insert summary before the log section, and clear the log
+  const summaryAndClear = summarySection + "\n" + LOG_HEADER + "\n\n";
+
+  // Remove old log section content, keep the header, insert summary before it
   const updated = content.replace(
     LOG_PATTERN,
-    `\n## 📋 经验日志\n\n> 已蒸馏到上方摘要，日志已清空。新的经验将追加在此。\n\n`
+    "\n" + summaryAndClear
   );
 
   await writeFile(pagePath, updated);
@@ -71,6 +86,6 @@ export async function distill(
   return {
     pagePath,
     logCount,
-    summary,
+    summary: summarySection.trim(),
   };
 }

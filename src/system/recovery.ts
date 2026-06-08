@@ -202,16 +202,19 @@ async function recoverWeave(
 }
 
 /** Extract [[wikilink]] paths from a wiki page's ## 🔗 相关链接 section */
+/** Extract [[wikilink]] paths from a wiki page's ## 🔗 相关链接 section */
 function extractLinkedFromWiki(content: string): string[] {
-  // Find the ## 🔗 相关链接 section
-  const sectionMatch = content.match(/## 🔗 相关链接\n([\s\S]*?)(?:\n---|\n## |$)/);
+  // C3 fix: robust section extraction — handle \n, \r\n, trailing whitespace
+  const sectionMatch = content.match(
+    /## 🔗 相关链接\r?\n([\s\S]*?)(?=\r?\n## |\r?\n---|\r?\n\[|$)/
+  );
   if (!sectionMatch) return [];
 
   const links: string[] = [];
   const linkRe = /\[\[([^\]]+)\]\]/g;
   let m: RegExpExecArray | null;
   while ((m = linkRe.exec(sectionMatch[1])) !== null) {
-    links.push(m[1]);
+    links.push(m[1].trim());
   }
   return links;
 }

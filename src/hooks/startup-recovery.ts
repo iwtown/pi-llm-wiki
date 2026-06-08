@@ -12,7 +12,6 @@ import { detectProject } from "../project";
 import { PATHS, INGEST_MAX_CHARS, LLM_WIKI } from "../config";
 
 const INGEST_MARKER = "pi-llm-wiki:ingested";
-const STATE_FILE = "/tmp/pi-llm-wiki-recovery-last-run";
 const PROCESSED_FILE = path.join(
   process.env.HOME ?? "/home",
   ".pi/agent/.pi-llm-wiki-recovery-processed"
@@ -203,19 +202,6 @@ ${content.slice(0, INGEST_MAX_CHARS)}
   }
 }
 
-function getLastRunTime(): number {
-  try {
-    const ts = fs.readFileSync(STATE_FILE, "utf-8").trim();
-    return parseInt(ts, 10) || 0;
-  } catch {
-    return 0;
-  }
-}
-
-function saveRunTime(): void {
-  fs.writeFileSync(STATE_FILE, String(Date.now()), "utf-8");
-}
-
 /** Scan sessions directory for unprocessed sessions (not in processed set) */
 function findOrphanSessions(processed: Set<string>): string[] {
   const orphans: string[] = [];
@@ -230,6 +216,12 @@ function findOrphanSessions(processed: Set<string>): string[] {
   for (const dir of projectDirs) {
     const dirPath = path.join(SESSIONS_DIR, dir);
     if (!fs.statSync(dirPath).isDirectory()) continue;
+
+    // M4: Skip non-Pi session directories. Pi dirs match --<cwd>-- pattern.
+    if (!dir.startsWith("--") || !dir.endsWith("--")) {
+      dlog(`skip non-Pi dir: ${dir}`);
+      continue;
+    }
 
     let sessionFiles: string[];
     try {

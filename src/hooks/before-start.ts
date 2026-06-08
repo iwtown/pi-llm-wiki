@@ -9,6 +9,20 @@ import { PATHS, LLM_WIKI } from "../config";
 import * as fs from "node:fs";
 import * as path from "node:path";
 
+/** Retry a promise-returning function with delay */
+async function retry<T>(fn: () => Promise<T>, retries: number, delayMs: number): Promise<T> {
+  let lastErr: unknown;
+  for (let i = 0; i <= retries; i++) {
+    try {
+      return await fn();
+    } catch (e) {
+      lastErr = e;
+      if (i < retries) await new Promise((r) => setTimeout(r, delayMs));
+    }
+  }
+  throw lastErr;
+}
+
 const SLOG_PATH = path.join(process.env.HOME ?? "/home", ".pi/agent/pi-llm-wiki.log");
 
 let schemaCache: string | null = null;
@@ -24,12 +38,17 @@ export async function injectSchema(pi: ExtensionAPI): Promise<void> {
         return { systemPrompt: event.systemPrompt + prefix };
       }
 
-      // Try REST API first (most reliable, uses full Obsidian parser)
-      const online = await ping();
+      // C4: Try REST API first with one retry for transient failures
+      let online = await ping();
+      if (!online) {
+        // Retry once after 1s for transient connectivity issues
+        await new Promise((r) => setTimeout(r, 1000));
+        online = await ping();
+      }
       let schema: string;
 
       if (online) {
-        schema = await readFile(PATHS.schema);
+        schema = await retry(() => readFile(PATHS.schema), 2, 500);
       } else {
         // Fallback: read from filesystem
         schema = fs.readFileSync(`${LLM_WIKI.vault}/${PATHS.schema}`, "utf-8");
