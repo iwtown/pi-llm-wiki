@@ -5,56 +5,15 @@
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import * as fs from "node:fs";
-import * as path from "node:path";
 import { ingest } from "../tools/ingest";
 import { detectProject } from "../project";
-import { LLM_WIKI, PATHS } from "../config";
+import { LLM_WIKI } from "../config";
+import { fileDlog, slog } from "../system/log";
 
 const VAULT = LLM_WIKI.vault;
 
-const DEBUG_LOG = path.join(
-  process.env.HOME ?? "/home",
-  ".pi/agent/pi-llm-wiki-debug.log"
-);
-const STRUCTURED_LOG = path.join(
-  process.env.HOME ?? "/home",
-  ".pi/agent/pi-llm-wiki.log"
-);
-const SLOG_MAX_BYTES = 1_000_000; // 1MB rotation threshold
-
 // In-memory cache to avoid vault filesystem scan on every agent_end
 const ingestedSessionIds = new Set<string>();
-
-function dlog(msg: string): void {
-  const ts = new Date().toISOString();
-  const line = `[${ts}] ${msg}`;
-  fs.appendFileSync(DEBUG_LOG, `${line}\n`);
-  console.error(`[pi-llm-wiki:DEBUG] ${msg}`);
-}
-
-/** Structured log entry for machine parsing, with rotation */
-function slog(event: string, data: Record<string, unknown> = {}): void {
-  const ts = new Date().toISOString();
-  const entry = JSON.stringify({ ts, event, ...data });
-  try {
-    // Rotate if over 1MB
-    if (fs.existsSync(STRUCTURED_LOG)) {
-      const stat = fs.statSync(STRUCTURED_LOG);
-      if (stat.size > SLOG_MAX_BYTES) {
-        for (let i = 2; i >= 0; i--) {
-          const oldPath = `${STRUCTURED_LOG}.${i}`;
-          const newPath = `${STRUCTURED_LOG}.${i + 1}`;
-          if (fs.existsSync(oldPath)) fs.renameSync(oldPath, newPath);
-        }
-        fs.renameSync(STRUCTURED_LOG, `${STRUCTURED_LOG}.0`);
-      }
-    }
-    fs.appendFileSync(STRUCTURED_LOG, entry + "\n");
-  } catch {
-    // non-fatal
-  }
-}
 
 const INGEST_MARKER = "pi-llm-wiki:ingested";
 
@@ -214,20 +173,20 @@ export async function autoIngest(pi: ExtensionAPI): Promise<void> {
   pi.on("agent_end", async (event, ctx) => {
     const startTime = Date.now();
     const sessionId = (ctx as any).sessionManager?.sessionId ?? "";
-    dlog(`agent_end fired, sessionManager=${!!ctx.sessionManager}, getBranch=${typeof ctx.sessionManager?.getBranch}`);
+    fileDlog(`agent_end fired, sessionManager=${!!ctx.sessionManager}, getBranch=${typeof ctx.sessionManager?.getBranch}`);
     try {
       // Check if obs_ingest was already called this session
       const entries = ctx.sessionManager?.getBranch?.() ?? [];
-      dlog(`getBranch returned ${entries.length} entries`);
+      fileDlog(`getBranch returned ${entries.length} entries`);
       const alreadyIngested = entries.some(
         (e: any) => e.type === "custom" && e.customType === INGEST_MARKER
       );
-      dlog(`alreadyIngested=${alreadyIngested}`);
+      fileDlog(`alreadyIngested=${alreadyIngested}`);
       if (alreadyIngested) return; // skip — explicit ingest was done
 
       // G3: Use in-memory cache instead of vault filesystem scan
       if (ingestedSessionIds.has(sessionId)) {
-        dlog(`skip: session ${sessionId} in memory cache`);
+        fileDlog(`skip: session ${sessionId} in memory cache`);
         return;
       }
 
@@ -235,35 +194,35 @@ export async function autoIngest(pi: ExtensionAPI): Promise<void> {
       const userMsgs = extractUserMessages(entries);
       const totalUserChars = userMsgs.reduce((sum, m) => sum + m.length, 0);
       if (userMsgs.length <= 1 && totalUserChars < 200) {
-        dlog(`skip: trivial session (${userMsgs.length} msgs, ${totalUserChars} chars)`);
+        fileDlog(`skip: trivial session (${userMsgs.length} msgs, ${totalUserChars} chars)`);
         ingestedSessionIds.add(sessionId); // don't recheck
         return;
       }
 
       // Try to build summary from pi-observational-memory
       const { obs, refs } = extractObservations(entries);
-      dlog(`extracted obs=${obs.length} refs=${refs.length}`);
+      fileDlog(`extracted obs=${obs.length} refs=${refs.length}`);
       let summary = buildAutoSummary(obs, refs);
 
       if (!summary) {
-        dlog(`buildAutoSummary returned null (OM data empty) — trying fallback from raw user messages`);
+        fileDlog(`buildAutoSummary returned null (OM data empty) — trying fallback from raw user messages`);
         summary = buildFallbackSummary(entries);
       }
 
       if (!summary) {
-        dlog(`buildFallbackSummary also returned null — skipping (no user messages found)`);
+        fileDlog(`buildFallbackSummary also returned null — skipping (no user messages found)`);
         return;
       }
 
-      dlog(`calling ingest, summary length=${summary.length}, ctx.cwd=${ctx.cwd}`);
+      fileDlog(`calling ingest, summary length=${summary.length}, ctx.cwd=${ctx.cwd}`);
       await ingest(summary, ctx);
       ingestedSessionIds.add(sessionId);
-      dlog(`ingest completed in ${Date.now() - startTime}ms`);
+      fileDlog(`ingest completed in ${Date.now() - startTime}ms`);
       const logProject = detectProject(ctx.cwd ?? process.cwd());
       slog("auto_ingest_ok", { project: logProject?.name ?? "unknown", sessionId, durationMs: Date.now() - startTime, hasOmData: obs.length > 0 || refs.length > 0 });
     } catch (e: any) {
-      dlog(`Auto-ingest FAILED: ${e.message}`);
-      if (e.stack) dlog(`Stack: ${e.stack}`);
+      fileDlog(`Auto-ingest FAILED: ${e.message}`);
+      if (e.stack) fileDlog(`Stack: ${e.stack}`);
       slog("auto_ingest_fail", { error: e.message, sessionId });
     }
   });

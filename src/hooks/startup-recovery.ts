@@ -10,6 +10,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { detectProject } from "../project";
 import { PATHS, INGEST_MAX_CHARS, LLM_WIKI } from "../config";
+import { dlog } from "../system/log";
 
 const INGEST_MARKER = "pi-llm-wiki:ingested";
 const PROCESSED_FILE = path.join(
@@ -42,10 +43,6 @@ function markProcessed(ids: string[]): void {
   } catch {
     // non-fatal
   }
-}
-
-function dlog(msg: string): void {
-  console.error(`[pi-llm-wiki:recovery] ${msg}`);
 }
 
 /** Parse JSONL lines, extracting user messages and checking for ingest marker */

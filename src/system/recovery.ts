@@ -12,12 +12,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { readFile, writeFile } from "../client";
 import { markWeaved, markLinted, getStuckSessions } from "../manifest";
 import { PATHS } from "../config";
-
-const DEBUG = true;
-
-function dlog(msg: string): void {
-  if (DEBUG) console.error(`[pi-llm-wiki:recovery] ${msg}`);
-}
+import { dlog } from "../system/log";
 
 export interface RecoveryResult {
   recovered: number;

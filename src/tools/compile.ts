@@ -90,7 +90,7 @@ export async function compile(
   // Build wiki page content
   const links = params.links ?? [];
   const linkLines = links.map((l) => `- [[${l}]]`).join("\n");
-  const dateLine = date ? `date: ${date}` : "";
+  const dateLine = date ? `created: ${date}` : "";
 
   const wikiContent = `---
 title: "${title}"

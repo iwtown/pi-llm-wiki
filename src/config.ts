@@ -2,6 +2,8 @@
  * pi-llm-wiki — Configuration constants and vault settings.
  */
 
+import * as path from "node:path";
+
 function getApiKey(): string {
   const key = process.env.OBSIDIAN_LLM_WIKI_KEY ?? process.env.OBSIDIAN_LLM_WIKI_SMART_KEY;
   if (!key) {
@@ -24,6 +26,8 @@ export const LLM_WIKI = {
   vaultWindows: "D:\\DB\\Obsidian\\LLM-Wiki",
 };
 
+const HOME = process.env.HOME ?? "/home";
+
 export const PATHS = {
   schema: "schema.md",
   log: "log.md",
@@ -35,6 +39,10 @@ export const PATHS = {
   rawSessions: "raw/sessions",
   rawClippings: "raw/clippings",
   rawNotes: "raw/notes",
+  /** Debug log (human-readable, append-only) */
+  debug: path.join(HOME, ".pi/agent/pi-llm-wiki-debug.log"),
+  /** Structured JSON log (for dashboard consumption) */
+  structured: path.join(HOME, ".pi/agent/pi-llm-wiki.log"),
 };
 
 export const WIKI_TYPES = [

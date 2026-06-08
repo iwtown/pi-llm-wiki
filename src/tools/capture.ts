@@ -42,7 +42,7 @@ tags: [${tagList.join(", ")}]
 type: "${wikiType}"
 project: "${projectName}"
 cssclasses: ["${wikiType}"]
-date: ${date}
+created: ${date}
 captured: ${date}
 related: [${params.relatedPages?.join(", ") ?? ""}]
 ---
