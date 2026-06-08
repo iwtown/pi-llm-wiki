@@ -1,23 +1,25 @@
 /**
  * pi-llm-wiki — Main entry point.
- * Registers 9 knowledge management tools + 3 lifecycle hooks for Pi Agent × Obsidian LLM-Wiki.
+ * Registers 2 knowledge management tools + 3 lifecycle hooks.
  *
- * Tools: obs-ingest, obs-query, obs-compile, obs-weave, obs-lint, obs-capture, obs-reference, obs-aggregate, obs-distill
- * Hooks: before_agent_start (inject schema), agent_end (auto ingest safety net)
+ * Tools: obs-query (retrieval), obs-admin (capture/reference/aggregate/distill)
+ * Hooks: before_agent_start (schema + auto-pipeline), agent_end (auto ingest), startup-recovery
+ *
+ * Auto-handled (no tool registration needed — run via hooks):
+ *   ingest   → agent_end auto-ingest
+ *   compile  → before_agent_start auto-compile (≥5 threshold)
+ *   weave    → before_agent_start auto-weave after compile
+ *   lint     → before_agent_start auto-lint after compile
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 
 import { injectSchema } from "./hooks/before-start";
-import { autoIngest, markIngested } from "./hooks/agent-end";
+import { autoIngest } from "./hooks/agent-end";
 import { registerStartupRecovery } from "./hooks/startup-recovery";
 import { refreshSystemPages } from "./system/refresh";
-import { ingest } from "./tools/ingest";
 import { query } from "./tools/query";
-import { compile } from "./tools/compile";
-import { weave } from "./tools/weave";
-import { lint } from "./tools/lint";
 import { capture } from "./tools/capture";
 import { reference } from "./tools/reference";
 import { aggregate } from "./tools/aggregate";
@@ -35,77 +37,34 @@ export default function (pi: ExtensionAPI) {
   registerStartupRecovery(pi);
   refreshSystemPages(pi);
 
-  // ─── Tool: obs-ingest ────────────────────────────────────
-
-  pi.registerTool({
-    name: "obs_ingest",
-    label: "obs-ingest: Session Retrospective",
-    description:
-      "Write a session retrospective to raw/sessions/<project>/ in the LLM-Wiki vault. " +
-      "Extracts goals, decisions, insights, and open issues (≤500 words). " +
-      "Triggers: session end, 复盘, ingest, 会话结束.",
-    parameters: Type.Object({
-      content: Type.String({
-        description: "Session retrospective in markdown. Must include: 🎯goals, ⚖️decisions, 💡insights, ⚠️open issues.",
-      }),
-    }),
-    async execute(toolCallId, params, _signal, _onUpdate, ctx) {
-      const result = await ingest(params.content, ctx);
-      markIngested(pi); // prevent agent_end from creating duplicate
-      return {
-        content: [
-          {
-            type: "text",
-            text: `✅ 已复盘会话到 LLM-Wiki\n> 文件: ${result.path}\n> 项目: ${result.project}`,
-          },
-        ],
-        details: result,
-      };
-    },
-  });
-
-  // ─── Tool: obs-query ─────────────────────────────────────
+  // ─── Tool: obs-query (retrieval) ──────────────────────────
 
   pi.registerTool({
     name: "obs_query",
     label: "obs-query: Knowledge Base Search",
     description:
-      "Search the LLM-Wiki knowledge base. Returns titles, snippets, and tags. " +
-      "Use for: looking up past decisions, concepts, commands, project knowledge. " +
-      "Keyword triggers: 查知识库, 搜索wiki, obs-query, 之前怎么做的.\n\n" +
-      "\u0049\u004d\u0050\u004f\u0052\u0054\u0041\u004e\u0054\u003a " +
-      "\u0046\u006f\u0072 \u006b\u006e\u006f\u0077\u006e \u0063\u0061\u0074\u0065\u0067\u006f\u0072\u0069\u0065\u0073 " +
-      "(\u0063\u006f\u006e\u0063\u0065\u0070\u0074\u0073\u002f\u0064\u0065\u0063\u0069\u0073\u0069\u006f\u006e\u0073\u002f\u0064\u0069\u0073\u0063\u006f\u0076\u0065\u0072\u0069\u0065\u0073\u002f\u0063\u006f\u006d\u006d\u0061\u006e\u0064\u0073\u002f\u0070\u0072\u006f\u006a\u0065\u0063\u0074\u0073), " +
-      "\u004a\u0075\u0073\u0074 \u0072\u0065\u0061\u0064 \u0074\u0068\u0065 \u0070\u0072\u0065\u002d\u0063\u006f\u006d\u0070\u0075\u0074\u0065\u0064 " +
-      "\u0044\u0061\u0074\u0061\u0076\u0069\u0065\u0077 \u0069\u006e\u0064\u0065\u0078 \u0070\u0061\u0067\u0065 " +
-      "(\u0077\u0069\u006b\u0069\u002f\u0073\u0075\u006f\u0079\u0069\u006e\u002f\u0078\u0078\u0078\u002e\u006d\u0064) " +
-      "\u0074\u006f \u006c\u0069\u0073\u0074 \u0061\u006c\u006c \u0070\u0061\u0067\u0065\u0073 \u0069\u006e \u0074\u0068\u0061\u0074 " +
-      "\u0063\u0061\u0074\u0065\u0067\u006f\u0072\u0079\u002c \u0074\u0068\u0065\u006e \u0072\u0065\u0061\u0064 \u0074\u0068\u0065 " +
-      "\u0074\u0061\u0072\u0067\u0065\u0074 \u0070\u0061\u0067\u0065 \u0064\u0069\u0072\u0065\u0063\u0074\u006c\u0079. " +
-      "\u0054\u0068\u0069\u0073 \u0069\u0073 \u0066\u0061\u0073\u0074\u0065\u0072 \u0061\u006e\u0064 \u0064\u006f\u0065\u0073 " +
-      "\u006e\u006f\u0074 \u0063\u006f\u006e\u0073\u0075\u006d\u0065 \u004f\u0062\u0073\u0069\u0064\u0069\u0061\u006e " +
-      "\u0043\u0050\u0055. \u0055\u0073\u0065 \u006f\u0062\u0073\u005f\u0071\u0075\u0065\u0072\u0079 \u006f\u006e\u006c\u0079 " +
-      "\u0077\u0068\u0065\u006e \u0074\u0068\u0065 \u0063\u0061\u0074\u0065\u0067\u006f\u0072\u0079 \u0069\u0073 " +
-      "\u0075\u006e\u0063\u006c\u0065\u0061\u0072 \u006f\u0072 \u0079\u006f\u0075 \u006e\u0065\u0065\u0064 " +
-      "\u006e\u0065\u0061\u0072\u002d\u0064\u0075\u0070\u006c\u0069\u0063\u0061\u0074\u0065 \u0063\u0072\u006f\u0073\u0073\u002d\u0063\u0061\u0074\u0065\u0067\u006f\u0072\u0079 " +
-      "\u0073\u0065\u0061\u0072\u0063\u0068\u002e",
+      "Search all LLM-Wiki pages by keyword. Returns titles, snippets, tags. " +
+      "Keywords: 查知识库, 搜索wiki, 之前怎么做的.\n\n" +
+      "IMPORTANT: For known categories (concepts/decisions/discoveries/commands/projects), " +
+      "just read the Dataview index (wiki/索引/某类.md) to list pages, then read the target directly. " +
+      "Faster, no API call. Use obs_query only for fuzzy or cross-category search.",
     parameters: Type.Object({
-      query: Type.String({ description: "Search query for the knowledge base." }),
+      query: Type.String({ description: "Search query." }),
       scope: Type.Optional(
-        Type.String({ description: "Search scope: 'all', 'wiki', 'raw', or a vault name." })
+        Type.String({ description: "Scope: 'all', 'wiki', 'raw', or vault name." })
       ),
       limit: Type.Optional(
         Type.Number({ description: "Max results (default: 3)." })
       ),
       depth: Type.Optional(
-        Type.String({ description: "Search depth: 'brief' (titles only), 'normal' (snippets), 'full' (page content). Default: 'normal'." })
+        Type.String({ description: "'brief' (titles), 'normal' (snippets), 'full' (content). Default: normal." })
       ),
     }),
     async execute(toolCallId, params, _signal, _onUpdate, ctx) {
       const results = await query(params.query, { scope: params.scope, limit: params.limit, depth: params.depth as "brief" | "normal" | "full" | undefined }, ctx);
       if (results.length === 0) {
         return {
-          content: [{ type: "text", text: "📭 LLM-Wiki 中未找到匹配结果。" }],
+          content: [{ type: "text", text: "📭 未找到匹配结果。" }],
           details: { results: [] },
         };
       }
@@ -116,321 +75,95 @@ export default function (pi: ExtensionAPI) {
         )
         .join("\n\n");
       return {
-        content: [{ type: "text", text: `🔍 搜索 "${params.query}":\n\n${text}` }],
+        content: [{ type: "text", text: `🔍 "${params.query}":\n\n${text}` }],
         details: { results },
       };
     },
   });
 
-  // ─── Tool: obs-compile ───────────────────────────────────
+  // ─── Tool: obs-admin (capture / reference / aggregate / distill) ───
 
   pi.registerTool({
-    name: "obs_compile",
-    label: "obs-compile: Compile Raw → Wiki",
+    name: "obs_admin",
+    label: "obs-admin: Knowledge Admin Functions",
     description:
-      "Compile a raw/sessions/ file into a structured wiki/ page with double-links. " +
-      "Returns linkedTo paths for obs-weave follow-up. " +
-      "Triggers: when ≥5 uncompiled raw sessions exist, or user says 编译, compile.",
+      "Admin operations on the LLM-Wiki. Use the `action` parameter to pick which: " +
+      "capture (save insight), reference (cross-vault ref), aggregate (quarterly summary), distill (compress logs). " +
+      "Keywords: 记下来, capture, 跨库, aggregate, 聚合, distill, 蒸馏.",
     parameters: Type.Object({
-      rawPath: Type.String({ description: "Path to the raw session file, e.g. 'raw/sessions/Pi-Agent/2026-06-05-foo.md'." }),
+      action: Type.String({ description: "One of: capture, reference, aggregate, distill." }),
+      // capture params
+      title: Type.Optional(Type.String({ description: "Title (required for capture)." })),
+      content: Type.Optional(Type.String({ description: "Markdown content (required for capture)." })),
+      tags: Type.Optional(Type.Array(Type.String(), { description: "Tags (optional)." })),
       wikiType: Type.Optional(
-        Type.String({ description: "Wiki category: 概念, 决策, 命令, 流程, 发现, 项目. Default: 发现." })
-      ),
-      links: Type.Optional(
-        Type.Array(Type.String(), { description: "List of existing wiki pages to link to." })
-      ),
-    }),
-    async execute(toolCallId, params, _signal, _onUpdate, ctx) {
-      const result = await compile(
-        params.rawPath,
-        { wikiType: params.wikiType, links: params.links },
-        ctx
-      );
-      if (!result) {
-        return {
-          content: [{ type: "text", text: `❌ 编译失败：无法读取 ${params.rawPath}。` }],
-          details: { error: "file not found or invalid format" },
-        };
-      }
-
-      // P-3: Dedup suggestion — similar page already exists
-      if (result.dedupSuggestion) {
-        return {
-          content: [{ type: "text", text: result.dedupSuggestion }],
-          details: result,
-        };
-      }
-      const linkedList = result.linkedTo.map((l) => `  - [[${l}]]`).join("\n");
-      const insightsLine =
-        result.insights.length > 0
-          ? `💡 提取到 ${result.insights.length} 条洞察:\n${result.insights.map((s) => `  - ${s}`).join("\n")}\n\n`
-          : "";
-      const upgradeLine =
-        result.upgrades && result.upgrades.length > 0
-          ? `🚀 知识升级: ${result.upgrades.length} 条洞察已跨项目验证:\n${result.upgrades.map((u) => `  - "${u.insight.slice(0, 60)}..." → ${u.projectCount} 个项目 → 建议 ${u.suggestedTarget}`).join("\n")}\n\n`
-          : "";
-      return {
-        content: [
-          {
-            type: "text",
-            text:
-              `✅ 编译完成\n> ${result.rawPath} → ${result.wikiPath}\n> 类型: ${result.wikiType}\n\n${insightsLine}${upgradeLine}🔗 需织入的页面:\n${linkedList || "  无"}\n\n⚠️ 请立即执行 obs-weave 更新关联页面。`,
-          },
-        ],
-        details: result,
-      };
-    },
-  });
-
-  // ─── Tool: obs-weave ─────────────────────────────────────
-
-  pi.registerTool({
-    name: "obs_weave",
-    label: "obs-weave: Weave into Existing Pages",
-    description:
-      "After obs-compile, update existing wiki pages with backlinks and experience log entries. " +
-      "MUST be called after every obs-compile. " +
-      "Triggers: after compile, 织入, weave.",
-    parameters: Type.Object({
-      rawPath: Type.String({ description: "Path to the raw session file that was compiled." }),
-      wikiPath: Type.String({ description: "Path to the newly compiled wiki page." }),
-      linkedTo: Type.Array(Type.String(), {
-        description: "List of existing wiki pages to update (from obs-compile result).",
-      }),
-      insights: Type.Optional(
-        Type.Array(Type.String(), { description: "Key insights to add as log entries." })
-      ),
-    }),
-    async execute(toolCallId, params, _signal, _onUpdate, ctx) {
-      const result = await weave(
-        params.rawPath,
-        params.wikiPath,
-        params.linkedTo,
-        params.insights ?? [],
-        ctx
-      );
-      const updatedList =
-        result.updatedPages.length > 0
-          ? result.updatedPages.map((p) => `  ✅ ${p}`).join("\n")
-          : "  无页面更新";
-      const errorList =
-        result.errors.length > 0
-          ? `\n\n⚠️ 错误:\n${result.errors.map((e) => `  - ${e}`).join("\n")}`
-          : "";
-      return {
-        content: [
-          {
-            type: "text",
-            text: `🧵 obs-weave 完成\n\n已更新页面:\n${updatedList}${errorList}`,
-          },
-        ],
-        details: result,
-      };
-    },
-  });
-
-  // ─── Tool: obs-lint ──────────────────────────────────────
-
-  pi.registerTool({
-    name: "obs_lint",
-    label: "obs-lint: Knowledge Base Health Check",
-    description:
-      "Run a health check on the LLM-Wiki: detect orphan nodes, stale content, broken links, missing frontmatter. " +
-      "Set fix=true to auto-mark stale pages with status: stale. " +
-      "Triggers: after compile+weave, or user says 检查, lint, 健康检查.",
-    parameters: Type.Object({
-      fix: Type.Optional(
-        Type.Boolean({ description: "Auto-mark stale pages with status: stale in frontmatter. Default: false." })
-      ),
-    }),
-    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const result = await lint(ctx, { fix: params.fix });
-      const summary = [
-        `📊 LLM-Wiki 健康检查`,
-        ``,
-        `| 级别 | 数量 |`,
-        `|------|------|`,
-        `| 🔴 错误 | ${result.summary.errors} |`,
-        `| 🟡 警告 | ${result.summary.warnings} |`,
-        `| 🔵 信息 | ${result.summary.info} |`,
-        `| **总计** | **${result.summary.total}** |`,
-        ``,
-      ].join("\n");
-
-      if (result.issues.length === 0) {
-        return {
-          content: [{ type: "text", text: `${summary}\n✅ 知识库健康，无问题。` }],
-          details: result,
-        };
-      }
-
-      const fixSection =
-        result.fixed && result.fixed.length > 0
-          ? `\n🔧 已自动修复 ${result.fixed.length} 个过期页面（标记 status: stale）:\n${result.fixed.map((p) => `  - ${p}`).join("\n")}\n`
-          : "";
-
-      const issueList = result.issues
-        .slice(0, 10)
-        .map((i) => {
-          const emoji = i.severity === "error" ? "🔴" : i.severity === "warning" ? "🟡" : "🔵";
-          return `${emoji} ${i.path}: ${i.message}`;
-        })
-        .join("\n");
-
-      return {
-        content: [{ type: "text", text: `${summary}\n${fixSection}${issueList}${result.issues.length > 10 ? `\n\n... 还有 ${result.issues.length - 10} 个问题` : ""}` }],
-        details: result,
-      };
-    },
-  });
-
-  // ─── Tool: obs-capture ───────────────────────────────────
-
-  pi.registerTool({
-    name: "obs_capture",
-    label: "obs-capture: Capture Insight to Wiki",
-    description:
-      "Save a key insight or discovery found during obs-query back into the wiki. " +
-      "Prevents knowledge from disappearing into chat history. " +
-      "Triggers: when obs-query finds something valuable, or user says 记下来, capture.",
-    parameters: Type.Object({
-      title: Type.String({ description: "Title for the captured page." }),
-      content: Type.String({ description: "Markdown content of the insight." }),
-      tags: Type.Optional(Type.Array(Type.String(), { description: "Tags for categorization." })),
-      wikiType: Type.Optional(
-        Type.String({ description: "Wiki category: 概念, 发现, 决策, 命令, 项目. Default: 发现." })
+        Type.String({ description: "Category: 概念, 发现, 决策, 命令, 项目. Default: 发现." })
       ),
       relatedPages: Type.Optional(
         Type.Array(Type.String(), { description: "Related wiki pages to link." })
       ),
+      // reference params
+      sourceVault: Type.Optional(Type.String({ description: "Source vault: 'Works' or 'MemPalace' (required for reference)." })),
+      sourcePath: Type.Optional(Type.String({ description: "Path in source vault (required for reference)." })),
+      note: Type.Optional(Type.String({ description: "Context note (required for reference)." })),
+      // aggregate params
+      year: Type.Optional(Type.Number({ description: "Year (required for aggregate/distill)." })),
+      quarter: Type.Optional(Type.Number({ description: "Quarter 1-4 (required for aggregate)." })),
+      project: Type.Optional(Type.String({ description: "Optional project filter for aggregate." })),
+      // distill params
+      pagePath: Type.Optional(Type.String({ description: "Wiki page path (required for distill)." })),
     }),
     async execute(toolCallId, params, _signal, _onUpdate, ctx) {
-      const result = await capture(
-        params.title,
-        params.content,
-        { tags: params.tags, wikiType: params.wikiType, relatedPages: params.relatedPages },
-        ctx
-      );
-      return {
-        content: [
-          {
-            type: "text",
-            text: `💾 ${result.action === "created" ? "已保存新发现" : "已更新"} 到 LLM-Wiki\n> ${result.path}`,
-          },
-        ],
-        details: result,
-      };
-    },
-  });
-
-  // ─── Tool: obs-reference ─────────────────────────────────
-
-  pi.registerTool({
-    name: "obs_reference",
-    label: "obs-reference: Cross-Vault Reference",
-    description:
-      "Create a cross-vault knowledge reference card. Does NOT copy source content — just records location and context. " +
-      "Supported vaults: Works, MemPalace. " +
-      "Triggers: when referencing knowledge from external Obsidian vaults.",
-    parameters: Type.Object({
-      sourceVault: Type.String({
-        description: "Source vault name: 'Works' or 'MemPalace'.",
-      }),
-      sourcePath: Type.String({
-        description: "Path to the note in the source vault, e.g. '概念/Pi扩展.md'.",
-      }),
-      note: Type.String({ description: "Why this reference is relevant; context notes." }),
-      tags: Type.Optional(Type.Array(Type.String(), { description: "Tags for categorization." })),
-    }),
-    async execute(toolCallId, params, _signal, _onUpdate, ctx) {
-      const result = await reference(
-        params.sourceVault,
-        params.sourcePath,
-        params.note,
-        { tags: params.tags },
-        ctx
-      );
-      return {
-        content: [
-          {
-            type: "text",
-            text:
-              `📎 已创建跨库引用\n> ${result.path}\n> 来源: ${result.source.vault}/${result.source.path}`,
-          },
-        ],
-        details: result,
-      };
-    },
-  });
-
-  // ─── Tool: obs-aggregate ─────────────────────────────────
-
-  pi.registerTool({
-    name: "obs_aggregate",
-    label: "obs-aggregate: Quarterly Knowledge Aggregation",
-    description:
-      "Aggregate compiled wiki pages from a quarter into wiki/记忆/YYYY/Qn.md. " +
-      "Extracts key themes and source pages. " +
-      "Triggers: quarterly review, 季度聚合, aggregate.",
-    parameters: Type.Object({
-      year: Type.Number({ description: "Year, e.g. 2026." }),
-      quarter: Type.Number({ description: "Quarter: 1-4." }),
-      project: Type.Optional(Type.String({ description: "Optional: specific project to aggregate." })),
-    }),
-    async execute(toolCallId, params, _signal, _onUpdate, ctx) {
-      const result = await aggregate(
-        { year: params.year, quarter: params.quarter, project: params.project },
-        ctx
-      );
-      if (!result) {
-        return {
-          content: [{ type: "text", text: `📭 ${params.year} Q${params.quarter} 无编译页面可聚合。` }],
-          details: null,
-        };
+      switch (params.action) {
+        case "capture": {
+          if (!params.title || !params.content) {
+            return { content: [{ type: "text", text: "❌ capture requires title and content." }], details: null };
+          }
+          const result = await capture(params.title, params.content, { tags: params.tags, wikiType: params.wikiType, relatedPages: params.relatedPages }, ctx);
+          return {
+            content: [{ type: "text", text: `💾 ${result.action === "created" ? "已保存" : "已更新"} → ${result.path}` }],
+            details: result,
+          };
+        }
+        case "reference": {
+          if (!params.sourceVault || !params.sourcePath || !params.note) {
+            return { content: [{ type: "text", text: "❌ reference requires sourceVault, sourcePath, and note." }], details: null };
+          }
+          const result = await reference(params.sourceVault, params.sourcePath, params.note, { tags: params.tags }, ctx);
+          return {
+            content: [{ type: "text", text: `📎 已创建跨库引用 → ${result.path}` }],
+            details: result,
+          };
+        }
+        case "aggregate": {
+          if (!params.year || !params.quarter) {
+            return { content: [{ type: "text", text: "❌ aggregate requires year and quarter." }], details: null };
+          }
+          const result = await aggregate({ year: params.year, quarter: params.quarter, project: params.project }, ctx);
+          if (!result) {
+            return { content: [{ type: "text", text: `📭 ${params.year} Q${params.quarter} 无内容可聚合。` }], details: null };
+          }
+          return {
+            content: [{ type: "text", text: `📚 ${params.year} Q${params.quarter} 聚合完成 → ${result.pageCount} 页，${result.keyThemes.length} 主题` }],
+            details: result,
+          };
+        }
+        case "distill": {
+          if (!params.pagePath) {
+            return { content: [{ type: "text", text: "❌ distill requires pagePath." }], details: null };
+          }
+          const result = await distill(params.pagePath, ctx);
+          if (!result) {
+            return { content: [{ type: "text", text: `📭 ${params.pagePath} 无日志可蒸馏。` }], details: null };
+          }
+          return {
+            content: [{ type: "text", text: `⚗️ 蒸馏完成: ${result.logCount} 条 → 摘要` }],
+            details: result,
+          };
+        }
+        default:
+          return { content: [{ type: "text", text: `❌ Unknown action: ${params.action}. Use: capture, reference, aggregate, distill.` }], details: null };
       }
-      return {
-        content: [
-          {
-            type: "text",
-            text:
-              `📚 ${params.year} Q${params.quarter} 季度聚合完成\n> ${result.outputPath}\n> ${result.pageCount} 个页面\n> ${result.keyThemes.length} 个关键主题\n\n${result.keyThemes.slice(0, 5).map((t) => `  - ${t}`).join("\n")}`,
-          },
-        ],
-        details: result,
-      };
-    },
-  });
-
-  // ─── Tool: obs-distill ───────────────────────────────────
-
-  pi.registerTool({
-    name: "obs_distill",
-    label: "obs-distill: Distill Experience Logs",
-    description:
-      "Distill the ## 📋 经验日志 section of a wiki page into a narrative summary, then clear the log. " +
-      "Per schema Rule 7: convergent distillation (monthly). " +
-      "Triggers: when experience log is too long, 蒸馏, distill.",
-    parameters: Type.Object({
-      pagePath: Type.String({ description: "Path to the wiki page, e.g. 'wiki/发现/agent-自动记录兜底机制.md'." }),
-    }),
-    async execute(toolCallId, params, _signal, _onUpdate, ctx) {
-      const result = await distill(params.pagePath, ctx);
-      if (!result) {
-        return {
-          content: [{ type: "text", text: `📭 ${params.pagePath} 无经验日志可蒸馏。` }],
-          details: null,
-        };
-      }
-      return {
-        content: [
-          {
-            type: "text",
-            text:
-              `⚗️ 蒸馏完成\n> ${result.pagePath}\n> ${result.logCount} 条经验日志 → 摘要\n\n${result.summary.slice(0, 500)}`,
-          },
-        ],
-        details: result,
-      };
     },
   });
 }
