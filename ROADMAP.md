@@ -1,13 +1,13 @@
 # pi-llm-wiki 开发计划书
 
-> 版本：`v1.5.0`（P0-P4 ✅，P5 长期维护待实施）  
+> 版本：`v1.6.0`（P0-P4 ✅，P5 ✅，G2 ✅）  
 > 详细优化计划见 `OPTIMIZATION_PLAN.md`
 > 位置：`~/projects/.dotfiles/modules/pi-llm-wiki/`（dotfiles submodule）  
-> 依赖：Obsidian Local REST API (`localhost:27126`) + `pi-observational-memory`
+> 依赖：obsidian-api 插件 (`localhost:27124`) + Smart Connections + `pi-observational-memory`
 
 ---
 
-## 一、当前版本确认（v1.4.0）
+## 一、当前版本确认（v1.6.0）
 
 ### 安装验证
 
@@ -135,13 +135,21 @@ recall tool                     →    obs_ingest (LLM 手动调用)
 
 > 详细计划和审核见 `OPTIMIZATION_PLAN.md` 和 `AUDIT_PLAN.md`。
 
+### G2 — 语义搜索（新增）
+
+| # | 任务 | 状态 |
+|---|------|------|
+| G2.1 | 安装 obsidian-api 插件（替代 local-rest-api） | ✅ |
+| G2.2 | obs_query 接入 Smart Connections 语义搜索 | ✅ |
+| G2.3 | 统一 API 端点，移除冗余插件 | ✅ |
+
 ### P5 — 长期维护
 
 | # | 任务 | 状态 |
 |---|------|------|
-| P5.1 | obs_aggregate：季度精华聚合 | ⬜ |
-| P5.2 | obs_distill：经验日志蒸馏 | ⬜ |
-| P5.3 | 自动化测试套件 | ⬜ |
+| P5.1 | obs_aggregate：季度精华聚合 | ✅ (已实现) |
+| P5.2 | obs_distill：经验日志蒸馏 | ✅ (已实现) |
+| P5.3 | 自动化测试套件 — 30 个单元测试 | ✅ |
 
 ---
 

@@ -1,7 +1,7 @@
 # pi-llm-wiki × Obsidian 工作流优化计划
 
 > 版本：2026-06-08（含审核修订）  
-> 状态：P0-P4 ✅ | Obsidian 配置 ✅ | 插件 15 个全部就绪 | 三文档一致
+> 状态：P0-P4 ✅ | G2 ✅ | P5 ✅ | Obsidian 配置 ✅ | 30 个单元测试 | 四文档一致
 
 ---
 
@@ -12,7 +12,7 @@
 | # | 盲区 | 风险 |
 |---|------|------|
 | G1 | **agent_end 无成功率监控** — `pi-llm-wiki.log` 只有 1 条记录，无法统计历史成/败 | 问题复发不会发现 |
-| G2 | **obs_query 没用 Smart Connections** — Agent 搜知识库只用 REST API 关键词，语义搜索仅 Obsidian UI 可用 | Agent 搜索质量无提升 |
+| G2 | ~~obs_query 没用 Smart Connections~~ | ✅ 已修复 — 接入 /search/smart 端点 |
 | G3 | **agent_end 每轮扫 vault 去重** — `alreadyInVault()` 遍历所有 raw/*.md，加 I/O | 每轮回复加延迟 |
 | G4 | **schema 注入失败静默** — before_agent_start 失败只打 console.error | 整场对话缺 LLM-Wiki 规则 |
 | G5 | **单轮对话也创建 raw** — "好的"/"继续" 产生无意义条目 | 噪音累积 |

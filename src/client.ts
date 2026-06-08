@@ -10,9 +10,6 @@ interface ApiError {
   message?: string;
 }
 
-// Allow self-signed HTTPS certs for local Obsidian API plugin
-process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
-
 async function request<T = unknown>(
   method: string,
   path: string,
