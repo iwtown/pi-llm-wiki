@@ -215,3 +215,52 @@ export function generateStatus(): string {
 
   return sections.join("\n");
 }
+
+/** Run lint summary (no issues, just counts). Used by refresh.ts for auto-lint logging. */
+export function autoLint(): { errors: number; warnings: number; stale: number; orphans: number; total: number } {
+  const rawFiles = readAllRaw();
+  const wikiFiles = collectWikiFiles();
+  const now = new Date().toISOString().split("T")[0];
+
+  const staleCutoff = new Date();
+  staleCutoff.setDate(staleCutoff.getDate() - STALE_DAYS);
+  const cutoffStr = staleCutoff.toISOString().split("T")[0];
+
+  const skipOrphan = new Set([
+    "wiki/图谱.md", "wiki/仪表盘.md", "wiki/流程巡检.md", "wiki/问题追踪.md", "wiki/hot.md", PATHS.index, PATHS.dashboard, PATHS.hot, PATHS.inspection, PATHS.issues
+  ]);
+
+  // Orphan count
+  const incomingCount = new Map<string, number>();
+  const wikiTitles = new Map<string, string>();
+  for (const wf of wikiFiles) {
+    const title = String(wf.fm.title ?? "");
+    if (title) wikiTitles.set(title, wf.relPath);
+    const links = [...wf.content.matchAll(/\[\[([^\]|#]+?)(?:[|#][^\]]+)?\]\]/g)];
+    for (const m of links) incomingCount.set(m[1].trim(), (incomingCount.get(m[1].trim()) ?? 0) + 1);
+  }
+  let orphans = 0;
+  for (const wf of wikiFiles) {
+    if (skipOrphan.has(wf.relPath) || wf.fm.kind === "system" || wf.relPath.startsWith("wiki/索引/")) continue;
+    const name = wf.relPath.replace(/\.md$/, "").replace("wiki/", "");
+    const title = String(wf.fm.title ?? "");
+    const inc = (incomingCount.get(wf.relPath.replace(/\.md$/, "")) ?? 0)
+              + (incomingCount.get(name) ?? 0)
+              + (incomingCount.get(title) ?? 0);
+    if (inc === 0) orphans++;
+  }
+
+  // Stale count
+  let stale = 0;
+  for (const wf of wikiFiles) {
+    if (wf.fm.kind === "system") continue;
+    const last = String(wf.fm.updated || wf.fm.compiled || "");
+    if (last && last < cutoffStr) stale++;
+  }
+
+  const total = wikiFiles.filter((wf) => wf.fm.kind !== "system").length;
+  const errors = 0;
+  const warnings = stale + orphans;
+
+  return { errors, warnings, stale, orphans, total };
+}
