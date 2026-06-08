@@ -173,8 +173,11 @@ Agent 调用 obs_query
 
 | # | 任务 | 说明 |
 |---|------|------|
-| F4 | Smart Connections 手动触发初始索引 | 避免首次使用时卡顿 |
-| F5 | Dataview 日期格式 + task 跟踪 | 虽然是 0 config 但可优化 |
+| F1 | Git showErrorNotices: true | ✅ 已设为 true |
+| F2 | Linter displayChanged: true | ✅ 已设为 true |
+| F3 | Graph View 颜色分组 — 10 个类别 | ✅ 全部覆盖 |
+| F4 | Smart Connections 手动触发初始索引 | ✅ 已触发，块级索引 20% 推进中 |
+| F5 | Dataview 日期格式 + task 跟踪 | ✅ 日期格式正确，task 跟踪已启用 |
 
 ### 中期（P4 知识进化）— 全部已完成 ✅
 
