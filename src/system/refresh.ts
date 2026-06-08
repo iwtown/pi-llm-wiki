@@ -24,10 +24,57 @@ function writeSystemPage(relPath: string, content: string): void {
   fs.writeFileSync(fullPath, content, "utf-8");
 }
 
+/** Read a compile template from vault and fill placeholders */
+function applyTemplate(templateName: string, vars: Record<string, string>): string {
+  const templatePath = path.join(VAULT, `templates/${templateName}`);
+  try {
+    let tpl = fs.readFileSync(templatePath, "utf-8");
+    // Remove frontmatter if present
+    tpl = tpl.replace(/^---\n[\s\S]*?\n---\n?/, "");
+    for (const [k, v] of Object.entries(vars)) {
+      tpl = tpl.replace(new RegExp(`\\{\\{${k}\\}\\}`, "g"), v);
+    }
+    // Add frontmatter from vars
+    const fm = Object.entries(vars)
+      .filter(([k]) => !["body"].includes(k))
+      .map(([k, v]) => `${k}: "${v.replace(/"/g, '\\"')}"`)
+      .join("\n");
+    return `---\n${fm}\n---\n\n${tpl}`;
+  } catch {
+    // Template not found — return empty (caller handles)
+    return "";
+  }
+}
+
 function appendLog(prefix: string, message: string): void {
   try {
     const date = new Date().toISOString().split("T")[0];
     const fullPath = path.join(VAULT, "log.md");
+
+    // Rotate if > 500 lines (archive first 80%)
+    try {
+      const existing = fs.readFileSync(fullPath, "utf-8");
+      const lines = existing.split("\n");
+      if (lines.length > 500) {
+        // Archive old entries to log-archive-YYYY-MM-DD.md
+        const archiveDate = new Date().toISOString().split("T")[0];
+        const archivePath = path.join(VAULT, `log-archive-${archiveDate}.md`);
+        const keepLines = lines.slice(0, 100); // keep first 100 (header + old overview)
+        const archiveLines = lines.slice(100, -100); // archive the middle
+        if (archiveLines.length > 0) {
+          fs.writeFileSync(
+            archivePath,
+            `# log.md 归档 — ${archiveDate}\n\n> 原始 log.md 超过 500 行，中间部分移至此处\n\n` +
+            archiveLines.join("\n") + "\n",
+            "utf-8"
+          );
+        }
+        // Rewrite log.md with kept + recent lines
+        const recentLines = lines.slice(-100);
+        fs.writeFileSync(fullPath, [...keepLines, "", `## [${date}] log.md 已归档 (${archiveLines.length} 行)`].join("\n") + "\n", "utf-8");
+      }
+    } catch {}
+
     fs.appendFileSync(fullPath, `## [${date}] ${prefix} | ${message}\n`);
   } catch { /* non-fatal */ }
 }
@@ -104,25 +151,15 @@ function autoCompile(): string[] {
         continue;
       }
 
-      // Build wiki page
-      const tagDir = wikiDir.startsWith("项目/") ? "项目" : wikiDir;
-      const wikiContent = `---
-title: "${title}"
-tags: [wiki/${tagDir}, compiled]
-type: "${tagDir}"
-project: "${project}"
-source: "${rawPath}"
-created: ${now}
-compiled: ${now}
-related: []
----
-
-# ${title}
-
-${body}
-
-> 自动编译自 [[${rawPath}]]
-`;
+      // Build wiki page from template
+      const templateName = wikiDir.startsWith("项目/") ? "compile-项目.md" : `compile-${wikiDir}.md`;
+      const wikiContent = applyTemplate(templateName, {
+        title: title.replace(/"/g, '\\"'),
+        project,
+        source: rawPath,
+        created: now,
+        body,
+      });
 
       const wikiFullPath = path.join(VAULT, wikiRelPath);
       fs.mkdirSync(path.dirname(wikiFullPath), { recursive: true });
@@ -303,23 +340,14 @@ function autoCompileZinbox(): string[] {
         continue;
       }
 
-      // Create wiki page
-      const wikiContent = `---
-title: "${title}"
-tags: [wiki/${wikiDir}, compiled, zinbox]
-type: "${wikiDir}"
-source: "zinbox://${rel}"
-created: ${now}
-compiled: ${now}
-related: []
----
-
-# ${title}
-
-${body}
-
-> 来源: [[zinbox://${rel}]] — ZInBox 剪藏库
-`;
+      // Create wiki page from template
+      const wikiContent = applyTemplate(`compile-${wikiDir}.md`, {
+        title: title.replace(/"/g, '\\"'),
+        project: "zinbox",
+        source: `zinbox://${rel}`,
+        created: now,
+        body: body.slice(0, 3000),
+      });
 
       const wikiFullPath = path.join(VAULT, wikiRelPath);
       fs.mkdirSync(path.dirname(wikiFullPath), { recursive: true });
