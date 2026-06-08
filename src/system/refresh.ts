@@ -212,6 +212,139 @@ function autoWeave(newWikiPaths: string[]): number {
   return updated;
 }
 
+// ── ZInBox auto-compile (compile clippings into wiki without copying to raw/) ──
+
+function autoCompileZinbox(): string[] {
+  const zinboxDir = LLM_WIKI.zinbox;
+  const indexDir = LLM_WIKI.zinboxIndex;
+  fs.mkdirSync(indexDir, { recursive: true });
+
+  // Scan ZInBox for .md files
+  const allZinboxFiles: string[] = [];
+  try {
+    for (const entry of fs.readdirSync(zinboxDir)) {
+      const full = path.join(zinboxDir, entry);
+      if (entry.startsWith(".")) continue;
+      if (entry === "00 Index.md" || entry === "00-Index.md") continue;
+      if (fs.statSync(full).isDirectory()) {
+        for (const sub of fs.readdirSync(full)) {
+          if (sub.endsWith(".md")) allZinboxFiles.push(path.join(full, sub));
+        }
+      } else if (entry.endsWith(".md")) {
+        allZinboxFiles.push(full);
+      }
+    }
+  } catch { return []; }
+
+  // Find uncompiled files
+  const existingIndexes = new Set(fs.readdirSync(indexDir));
+  const now = new Date().toISOString().split("T")[0];
+  const existingPaths = new Set(collectWikiPages().map((p) => p.path.replace(/\.md$/, "")));
+  const existingTitles = new Set(collectWikiPages().map((p) => p.title));
+  const newWikiPaths: string[] = [];
+  let compiled = 0;
+
+  // Limit per batch to avoid overwhelming
+  const BATCH_LIMIT = 15;
+
+  for (const zf of allZinboxFiles) {
+    if (compiled >= BATCH_LIMIT) break;
+
+    const rel = path.relative(zinboxDir, zf);
+    // Marker filename = hash of relative path (use safe filename)
+    const markerName = rel.replace(/[\\\/:*?"<>|]/g, "_").replace(/\.md$/, "") + ".md";
+
+    if (existingIndexes.has(markerName)) continue; // already tracked
+
+    try {
+      const content = fs.readFileSync(zf, "utf-8");
+      // Skip image-heavy or tiny files
+      if (content.length < 200) continue;
+
+      const fm = parseFrontmatter(content);
+      const title = String(fm.title ?? "").trim() || rel.replace(/\.md$/, "").replace(/^.*[\\\/]/, "");
+
+      // Check if already exists in wiki
+      if (existingTitles.has(title)) {
+        // Create marker anyway to avoid re-scan
+        fs.writeFileSync(
+          path.join(indexDir, markerName),
+          `---\nsource: "zinbox://${rel}"\ncompiled: true\nskipped: duplicate\n---\n`,
+          "utf-8"
+        );
+        existingIndexes.add(markerName);
+        continue;
+      }
+
+      // Extract body (after frontmatter)
+      const bodyMatch = content.match(/^---\n[\s\S]*?\n---\n?([\s\S]*)$/);
+      const body = (bodyMatch ? bodyMatch[1].trim() : content).slice(0, 3000);
+
+      // Determine wiki type
+      const typeHints: string[] = [];
+      if (/决策|决定|选择|改用|配置/.test(body)) typeHints.push("决策");
+      if (/发现|陷阱|注意|教训|坑/.test(body)) typeHints.push("发现");
+      if (/概念|原理|本质|模型|理论/.test(body)) typeHints.push("概念");
+      if (/步骤|流程|方法|如何|教程|指南/.test(body)) typeHints.push("流程");
+      if (/命令|CLI|命令行|快捷|快捷键/.test(body)) typeHints.push("命令");
+      const wikiDir = typeHints[0] || "发现";
+
+      const fileName = title.replace(/[/\\?%*:"<>]/g, "-").replace(/\s+/g, "-").slice(0, 80) || "untitled";
+
+      // Check path collision
+      const wikiRelPath = `wiki/${wikiDir}/${fileName}.md`;
+      if (existingPaths.has(wikiRelPath.replace(/\.md$/, ""))) {
+        fs.writeFileSync(
+          path.join(indexDir, markerName),
+          `---\nsource: "zinbox://${rel}"\ncompiled: true\nskipped: path_collision\n---\n`,
+          "utf-8"
+        );
+        existingIndexes.add(markerName);
+        continue;
+      }
+
+      // Create wiki page
+      const wikiContent = `---
+title: "${title}"
+tags: [wiki/${wikiDir}, compiled, zinbox]
+type: "${wikiDir}"
+source: "zinbox://${rel}"
+created: ${now}
+compiled: ${now}
+related: []
+---
+
+# ${title}
+
+${body}
+
+> 来源: [[zinbox://${rel}]] — ZInBox 剪藏库
+`;
+
+      const wikiFullPath = path.join(VAULT, wikiRelPath);
+      fs.mkdirSync(path.dirname(wikiFullPath), { recursive: true });
+      fs.writeFileSync(wikiFullPath, wikiContent, "utf-8");
+      newWikiPaths.push(wikiRelPath);
+
+      // Create marker
+      fs.writeFileSync(
+        path.join(indexDir, markerName),
+        `---\nsource: "zinbox://${rel}"\ncompiled: true\nwiki: "${wikiRelPath}"\n---\n`,
+        "utf-8"
+      );
+      existingIndexes.add(markerName);
+      compiled++;
+    } catch (e: any) {
+      // Skip unreadable files silently
+    }
+  }
+
+  if (compiled > 0) {
+    appendLog("compile", `ZInBox: ${compiled} clippings compiled to wiki`);
+  }
+  return newWikiPaths;
+}
+
 // ── Auto-lint ──
 
 function runAutoLint(): void {
@@ -232,10 +365,19 @@ function runAutoLint(): void {
 export function refreshSystemPages(pi: ExtensionAPI): void {
   pi.on("before_agent_start", async () => {
     try {
-      // Step 1: Auto-compile (if enough pending sessions)
-      const newPages = autoCompile();
+      // Step 1: Auto-compile (if enough pending raw sessions)
+      const rawPages = autoCompile();
+      let newPages = rawPages;
+
+      // Step 1b: ZInBox auto-compile (external clippings, no copy to raw/)
+      const zinboxPages = autoCompileZinbox();
+      if (zinboxPages.length > 0) {
+        console.error(`[pi-llm-wiki] ZInBox compile: ${zinboxPages.length} clippings`);
+        newPages = [...newPages, ...zinboxPages];
+      }
+
       if (newPages.length > 0) {
-        console.error(`[pi-llm-wiki] Auto-compiled ${newPages.length} sessions`);
+        console.error(`[pi-llm-wiki] Auto-compiled ${newPages.length} total`);
 
         // Step 2: Auto-weave backlinks
         const woven = autoWeave(newPages);

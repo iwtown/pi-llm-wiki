@@ -26,6 +26,8 @@ export const LLM_WIKI = {
   vaultWindows: "D:\\DB\\Obsidian\\LLM-Wiki",
   /** External clipping vault (ZInBox) — search-only, no copy */
   zinbox: "/mnt/d/DB/Obsidian/ZInBox",
+  /** ZInBox compile tracker (small marker files, no content copy) */
+  get zinboxIndex() { return this.vault + "/raw/zinbox-index"; },
 };
 
 const HOME = process.env.HOME ?? "/home";
