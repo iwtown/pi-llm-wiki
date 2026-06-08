@@ -109,6 +109,9 @@ export function generateStatus(): string {
   const orphans: string[] = [];
   for (const wf of wikiFiles) {
     if (skipOrphan.has(wf.relPath) || wf.fm.kind === "system" || wf.relPath.startsWith("wiki/索引/")) continue;
+    // Skip ZInBox clippings — they're external, intentionally orphan
+    const tags = String(wf.fm.tags ?? "");
+    if (tags.includes("zinbox")) continue;
     const name = wf.relPath.replace(/\.md$/, "").replace("wiki/", "");
     const title = String(wf.fm.title ?? "");
     const inc = (incomingCount.get(wf.relPath.replace(/\.md$/, "")) ?? 0)
@@ -146,9 +149,10 @@ export function generateStatus(): string {
 
   // ── Build status ──
   const hasIssues = pendingCompile > 0 || pendingWeave > 0 || pendingLint > 0
-    || orphans.length > 0 || stale.length > 0 || missingConceptCount > 0;
+    || stale.length > 0 || missingConceptCount > 0;
   const statusEmoji = hasIssues ? "🟡" : "🟢";
   const statusText = hasIssues ? "有需要关注的问题" : "一切正常";
+  const orphanNote = orphans.length > 0 ? ` (${orphans.length} 个孤立节点 — 独立发现，不影响使用)` : "";
 
   const sections: string[] = [
     "---",
@@ -162,7 +166,7 @@ export function generateStatus(): string {
     "",
     `> 自动生成 — 被动观察者只读页面`,
     "",
-    `## ${statusEmoji} ${statusText}`,
+    `## ${statusEmoji} ${statusText}${orphanNote}`,
     "",
     `| 指标 | 值 |`,
     `|------|------|`,
@@ -242,6 +246,9 @@ export function autoLint(): { errors: number; warnings: number; stale: number; o
   let orphans = 0;
   for (const wf of wikiFiles) {
     if (skipOrphan.has(wf.relPath) || wf.fm.kind === "system" || wf.relPath.startsWith("wiki/索引/")) continue;
+    // Skip ZInBox tagged pages (external clippings, intentionally orphan)
+    const tags = String(wf.fm.tags ?? "");
+    if (tags.includes("zinbox")) continue;
     const name = wf.relPath.replace(/\.md$/, "").replace("wiki/", "");
     const title = String(wf.fm.title ?? "");
     const inc = (incomingCount.get(wf.relPath.replace(/\.md$/, "")) ?? 0)
@@ -260,7 +267,8 @@ export function autoLint(): { errors: number; warnings: number; stale: number; o
 
   const total = wikiFiles.filter((wf) => wf.fm.kind !== "system").length;
   const errors = 0;
-  const warnings = stale + orphans;
+  // Orphans are informational, not warnings — they're independent discoveries
+  const warnings = stale;
 
   return { errors, warnings, stale, orphans, total };
 }

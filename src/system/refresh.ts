@@ -326,6 +326,23 @@ ${body}
       fs.writeFileSync(wikiFullPath, wikiContent, "utf-8");
       newWikiPaths.push(wikiRelPath);
 
+      // Append backlink to ZInBox hub page
+      try {
+        const hubPath = path.join(VAULT, "wiki/索引/ZInBox.md");
+        if (fs.existsSync(hubPath)) {
+          let hubContent = fs.readFileSync(hubPath, "utf-8");
+          const logEntry = `- [[${wikiRelPath.replace(/\.md$/, "")}]] auto-compile (${now})`;
+          if (!hubContent.includes(logEntry)) {
+            if (hubContent.includes("## 📋 经验日志")) {
+              hubContent = hubContent.replace("## 📋 经验日志", `## 📋 经验日志\n${logEntry}`);
+            } else {
+              hubContent = hubContent.trimEnd() + `\n\n## 📋 经验日志\n${logEntry}\n`;
+            }
+            fs.writeFileSync(hubPath, hubContent, "utf-8");
+          }
+        }
+      } catch {}
+
       // Create marker
       fs.writeFileSync(
         path.join(indexDir, markerName),
