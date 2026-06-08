@@ -18,7 +18,7 @@ interface QueryResult {
 }
 
 /** Parse YAML frontmatter tags from a markdown string */
-function extractTags(md: string): string[] {
+export function extractTags(md: string): string[] {
   const match = md.match(/^---\n([\s\S]*?)\n---/);
   if (!match) return [];
   const tagMatch = match[1].match(/tags:\s*\[(.+?)\]/);
@@ -27,7 +27,7 @@ function extractTags(md: string): string[] {
 }
 
 /** Extract wikilinks and descriptions from 图谱.md content */
-function parseAtlasLinks(content: string): Array<{ path: string; description: string }> {
+export function parseAtlasLinks(content: string): Array<{ path: string; description: string }> {
   const links: Array<{ path: string; description: string }> = [];
   // Match lines like: - [[wiki/概念/项目结构]] — Pi 生态全局目录
   const re = /-\s+\[\[([^\]]+)\]\](?:\s*[—\-]\s*(.+))?/g;
@@ -39,7 +39,7 @@ function parseAtlasLinks(content: string): Array<{ path: string; description: st
 }
 
 /** Score how well a query matches a string (simple case-insensitive word overlap) */
-function matchScore(query: string, text: string): number {
+export function matchScore(query: string, text: string): number {
   const qLower = query.toLowerCase();
   const tLower = text.toLowerCase();
   // Exact substring match = highest

@@ -16,7 +16,7 @@ export interface SessionStatus {
 }
 
 /** Parse YAML frontmatter from markdown text */
-function parseFrontmatter(md: string): Record<string, unknown> {
+export function parseFrontmatter(md: string): Record<string, unknown> {
   const match = md.match(/^---\n([\s\S]*?)\n---/);
   if (!match) return {};
   const yaml = match[1];
@@ -35,7 +35,7 @@ function parseFrontmatter(md: string): Record<string, unknown> {
 }
 
 /** Update frontmatter in markdown text */
-function updateFrontmatter(md: string, updates: Record<string, unknown>): string {
+export function updateFrontmatter(md: string, updates: Record<string, unknown>): string {
   const match = md.match(/^---\n([\s\S]*?)\n---/);
   if (!match) {
     // No frontmatter, create one
@@ -49,11 +49,11 @@ function updateFrontmatter(md: string, updates: Record<string, unknown>): string
 }
 
 /** Quote YAML value if it contains special characters */
-function quoteYaml(v: unknown): string {
+export function quoteYaml(v: unknown): string {
   if (typeof v === "boolean") return String(v);
   if (typeof v === "number") return String(v);
   const s = String(v);
-  if (/[:#\{\}\[\],&\*\?\|<>=!%@`]/.test(s) || s.includes("\n")) {
+  if (/[:#\{\}\[\],&\*\?\|<>="'!%@`]/.test(s) || s.includes("\n")) {
     return `"${s.replace(/"/g, '\\"')}"`;
   }
   return s;
