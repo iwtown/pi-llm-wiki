@@ -169,5 +169,17 @@ export function generateTracker(): string {
     `| 全链路完成 | ${completed.length} |`,
   );
 
+  lines.push(
+    "",
+    "## 🎯 Tasks 面板（Obsidian 中交互操作）",
+    "",
+    "### 🔴 待编译",
+    ...pendingCompile.map((s) => `- [ ] ${s.title} 📅 ${new Date().toISOString().split("T")[0]}`),
+    "",
+    "### 🟡 待织入",
+    ...pendingWeave.map((s) => `- [ ] ${s.title} 📅 ${new Date().toISOString().split("T")[0]}`),
+    "",
+  );
+
   return lines.join("\n");
 }
