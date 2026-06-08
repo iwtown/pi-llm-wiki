@@ -69,7 +69,7 @@ async function writeWithFallback(
 export async function ingest(
   content: string,
   ctx: ExtensionContext
-): Promise<{ path: string; project: string; writeMode: "api" | "fs" }> {
+): Promise<{ path: string; project: string; writeMode: "api" | "fs" | "skip" }> {
   const project = detectProject(ctx.cwd ?? process.cwd());
   const projectName = project?.name ?? "unknown";
   const date = new Date().toISOString().split("T")[0];
@@ -84,6 +84,21 @@ export async function ingest(
 
   // Extract session ID from context
   const sessionId = (ctx as any).sessionManager?.sessionId ?? "";
+
+  // G7: Check if this session was already ingested (dedup by session_id)
+  if (sessionId) {
+    const rawDir = path.join(VAULT_BASE, PATHS.rawSessions, projectName);
+    try {
+      const existing = fs.readdirSync(rawDir).filter((f) => f.endsWith(".md"));
+      for (const f of existing) {
+        const content = fs.readFileSync(path.join(rawDir, f), "utf-8");
+        if (content.includes(`session_id: "${sessionId}"`)) {
+          console.error(`[pi-llm-wiki] Session ${sessionId} already ingested, skipping`);
+          return { path: vaultPath, project: projectName, writeMode: "skip" };
+        }
+      }
+    } catch { /* dir may not exist yet */ }
+  }
 
   const template = buildTemplate(firstLine, projectName, date, sessionId, content);
 

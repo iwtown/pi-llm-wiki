@@ -7,6 +7,9 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { readFile, ping } from "../client";
 import { PATHS, LLM_WIKI } from "../config";
 import * as fs from "node:fs";
+import * as path from "node:path";
+
+const SLOG_PATH = path.join(process.env.HOME ?? "/home", ".pi/agent/pi-llm-wiki.log");
 
 let schemaCache: string | null = null;
 let schemaCacheTime = 0;
@@ -42,6 +45,9 @@ export async function injectSchema(pi: ExtensionAPI): Promise<void> {
     } catch (e: any) {
       // Schema injection failure is non-fatal — don't block agent
       console.error(`[pi-llm-wiki] Failed to inject schema: ${e.message}`);
+      try {
+        fs.appendFileSync(SLOG_PATH, JSON.stringify({ ts: new Date().toISOString(), event: "schema_inject_fail", error: e.message }) + "\n");
+      } catch { /* non-fatal */ }
       return undefined; // allow agent to proceed without schema
     }
   });

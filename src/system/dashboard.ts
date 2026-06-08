@@ -119,12 +119,31 @@ function healthScore(stats: RawStats): { score: number; grade: string } {
   return { score, grade };
 }
 
+/** Read agent_end success/failure counts from structured log */
+function agentEndStats(): { ok: number; fail: number; lastOk: string; lastFail: string } {
+  const logPath = path.join(process.env.HOME ?? "/home", ".pi/agent/pi-llm-wiki.log");
+  let ok = 0, fail = 0, lastOk = "", lastFail = "";
+  try {
+    const lines = safeReadFile(logPath).split("\n");
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      try {
+        const entry = JSON.parse(line);
+        if (entry.event === "auto_ingest_ok") { ok++; lastOk = entry.ts?.slice(0, 19) ?? ""; }
+        if (entry.event === "auto_ingest_fail") { fail++; lastFail = entry.ts?.slice(0, 19) ?? ""; }
+      } catch { continue; }
+    }
+  } catch { /* no log file yet */ }
+  return { ok, fail, lastOk, lastFail };
+}
+
 export function generateDashboard(): string {
   const now = new Date().toISOString().replace("T", " ").slice(0, 19);
   const { projects, global } = collectRawStats();
   const { score, grade } = healthScore(global);
   const ops = recentOps(8);
   const wikiCounts = wikiPageCounts();
+  const ae = agentEndStats();
 
   const compileRate = global.total > 0 ? Math.round((global.compiled / global.total) * 100) : 0;
   const weaveRate = global.total > 0 ? Math.round((global.weaved / global.total) * 100) : 0;
@@ -150,38 +169,39 @@ export function generateDashboard(): string {
     `| Lint 率 | ${global.linted}/${global.total} |`,
     `| 知识页 | ${Object.values(wikiCounts).reduce((a, b) => a + b, 0)} 页 (${Object.keys(wikiCounts).length} 个类别) |`,
     "",
-    "## 📂 项目分布",
+    "## 🤖 Agent End 自动摄入",
     "",
-    ...projects.map((p) =>
-      `| ${p.name} | ${p.total} | ${p.compiledRate}% |`
-    ),
+    `| 指标 | 值 |`,
+    `|------|------|`,
+    `| ✅ 成功 | ${ae.ok} |`,
+    `| ❌ 失败 | ${ae.fail} |`,
+    `| 📈 成功率 | ${ae.ok + ae.fail > 0 ? Math.round(ae.ok / (ae.ok + ae.fail) * 100) : "N/A"}% |`,
+    ae.lastOk ? `| 最近成功 | ${ae.lastOk} |` : "",
+    ae.lastFail ? `| 最近失败 | ${ae.lastFail} |` : "",
   ];
 
-  // Prepend header for project table
-  lines.splice(lines.length - projects.length, 0,
-    "| 项目 | Session | 编译率 |",
-    "|------|---------|--------|"
-  );
+  // Project distribution
+  lines.push("", "## 📂 项目分布", "");
+  lines.push("| 项目 | Session | 编译率 |", "|------|---------|--------|");
+  for (const p of projects) {
+    lines.push(`| ${p.name} | ${p.total} | ${p.compiledRate}% |`);
+  }
 
-  lines.push(
-    "",
-    "## 📝 最近操作",
-    "",
-    ops.length > 0
-      ? ops.map((o) => `- ${o.replace(/^##\s*/, "")}`).join("\n")
-      : "- 暂无记录",
-    "",
-    "## 📚 知识库分布",
-    "",
-    ...Object.entries(wikiCounts)
-      .sort((a, b) => b[1] - a[1])
-      .map(([cat, count]) => `| ${cat} | ${count} |`),
-  );
+  // Recent operations
+  lines.push("", "## 📝 最近操作", "");
+  if (ops.length > 0) {
+    for (const o of ops) lines.push(`- ${o.replace(/^##\s*/, "")}`);
+  } else {
+    lines.push("- 暂无记录");
+  }
 
-  lines.splice(lines.length - Object.keys(wikiCounts).length, 0,
-    "| 类别 | 页面数 |",
-    "|------|--------|"
-  );
+  // Wiki page distribution
+  lines.push("", "## 📚 知识库分布", "");
+  const sortedWiki = Object.entries(wikiCounts).sort((a, b) => b[1] - a[1]);
+  lines.push("| 类别 | 页面数 |", "|------|--------|");
+  for (const [cat, count] of sortedWiki) {
+    lines.push(`| ${cat} | ${count} |`);
+  }
 
   return lines.join("\n");
 }

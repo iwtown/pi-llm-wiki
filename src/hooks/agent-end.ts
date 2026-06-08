@@ -13,11 +13,18 @@ import { LLM_WIKI, PATHS } from "../config";
 
 const VAULT = LLM_WIKI.vault;
 
-const DEBUG_LOG = "/tmp/pi-llm-wiki-debug.log";
+const DEBUG_LOG = path.join(
+  process.env.HOME ?? "/home",
+  ".pi/agent/pi-llm-wiki-debug.log"
+);
 const STRUCTURED_LOG = path.join(
   process.env.HOME ?? "/home",
   ".pi/agent/pi-llm-wiki.log"
 );
+const SLOG_MAX_BYTES = 1_000_000; // 1MB rotation threshold
+
+// In-memory cache to avoid vault filesystem scan on every agent_end
+const ingestedSessionIds = new Set<string>();
 
 function dlog(msg: string): void {
   const ts = new Date().toISOString();
@@ -26,11 +33,23 @@ function dlog(msg: string): void {
   console.error(`[pi-llm-wiki:DEBUG] ${msg}`);
 }
 
-/** Structured log entry for machine parsing */
+/** Structured log entry for machine parsing, with rotation */
 function slog(event: string, data: Record<string, unknown> = {}): void {
   const ts = new Date().toISOString();
   const entry = JSON.stringify({ ts, event, ...data });
   try {
+    // Rotate if over 1MB
+    if (fs.existsSync(STRUCTURED_LOG)) {
+      const stat = fs.statSync(STRUCTURED_LOG);
+      if (stat.size > SLOG_MAX_BYTES) {
+        for (let i = 2; i >= 0; i--) {
+          const oldPath = `${STRUCTURED_LOG}.${i}`;
+          const newPath = `${STRUCTURED_LOG}.${i + 1}`;
+          if (fs.existsSync(oldPath)) fs.renameSync(oldPath, newPath);
+        }
+        fs.renameSync(STRUCTURED_LOG, `${STRUCTURED_LOG}.0`);
+      }
+    }
     fs.appendFileSync(STRUCTURED_LOG, entry + "\n");
   } catch {
     // non-fatal
@@ -79,27 +98,6 @@ function extractObservations(entries: any[]): { obs: OmObservation[]; refs: OmRe
     }
   }
   return { obs, refs };
-}
-
-/** Check vault filesystem if this session was already ingested (defense-in-depth beyond markIngested) */
-function alreadyInVault(projectName: string, sessionId: string): boolean {
-  if (!sessionId) return false;
-  const dir = path.join(VAULT, PATHS.rawSessions, projectName);
-  let files: string[];
-  try {
-    files = fs.readdirSync(dir).filter((f) => f.endsWith(".md"));
-  } catch {
-    return false;
-  }
-  for (const f of files) {
-    try {
-      const content = fs.readFileSync(path.join(dir, f), "utf-8");
-      if (content.includes(`session_id: "${sessionId}"`)) return true;
-    } catch {
-      continue;
-    }
-  }
-  return false;
 }
 
 function extractUserMessages(entries: any[]): string[] {
@@ -227,12 +225,18 @@ export async function autoIngest(pi: ExtensionAPI): Promise<void> {
       dlog(`alreadyIngested=${alreadyIngested}`);
       if (alreadyIngested) return; // skip — explicit ingest was done
 
-      // Defense-in-depth: check vault filesystem for duplicate session_id
-      const project = detectProject(ctx.cwd ?? process.cwd());
-      const projectName = project?.name ?? "unknown";
-      if (alreadyInVault(projectName, sessionId)) {
-        dlog(`skip: session ${sessionId} already in vault`);
-        markIngested(pi);
+      // G3: Use in-memory cache instead of vault filesystem scan
+      if (ingestedSessionIds.has(sessionId)) {
+        dlog(`skip: session ${sessionId} in memory cache`);
+        return;
+      }
+
+      // G5: Skip trivial sessions (≤1 user message, <200 chars total)
+      const userMsgs = extractUserMessages(entries);
+      const totalUserChars = userMsgs.reduce((sum, m) => sum + m.length, 0);
+      if (userMsgs.length <= 1 && totalUserChars < 200) {
+        dlog(`skip: trivial session (${userMsgs.length} msgs, ${totalUserChars} chars)`);
+        ingestedSessionIds.add(sessionId); // don't recheck
         return;
       }
 
@@ -253,8 +257,10 @@ export async function autoIngest(pi: ExtensionAPI): Promise<void> {
 
       dlog(`calling ingest, summary length=${summary.length}, ctx.cwd=${ctx.cwd}`);
       await ingest(summary, ctx);
+      ingestedSessionIds.add(sessionId);
       dlog(`ingest completed in ${Date.now() - startTime}ms`);
-      slog("auto_ingest_ok", { project: projectName, sessionId, durationMs: Date.now() - startTime, hasOmData: obs.length > 0 || refs.length > 0 });
+      const logProject = detectProject(ctx.cwd ?? process.cwd());
+      slog("auto_ingest_ok", { project: logProject?.name ?? "unknown", sessionId, durationMs: Date.now() - startTime, hasOmData: obs.length > 0 || refs.length > 0 });
     } catch (e: any) {
       dlog(`Auto-ingest FAILED: ${e.message}`);
       if (e.stack) dlog(`Stack: ${e.stack}`);
