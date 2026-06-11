@@ -220,11 +220,20 @@ export async function autoIngest(pi: ExtensionAPI): Promise<void> {
       fileDlog(`alreadyIngested=${alreadyIngested}`);
       if (alreadyIngested) return; // skip — explicit ingest was done
 
-      // Skip trivial sessions (≤1 user message, <200 chars total)
+      // Skip trivial sessions: single user message with short user input AND few assistant responses
       const userMsgs = extractUserMessages(entries);
       const totalUserChars = userMsgs.reduce((sum, m) => sum + m.length, 0);
-      if (userMsgs.length <= 1 && totalUserChars < 200) {
-        fileDlog(`skip: trivial session (${userMsgs.length} msgs, ${totalUserChars} chars)`);
+      const assistantCount = entries.filter((e: any) =>
+        (e.type === "message" && e.message?.role === "assistant") ||
+        (e.type === "assistant")
+      ).length;
+      const totalContentChars = entries.reduce((sum: number, e: any) => {
+        const text = extractMessageText(e.message ?? e);
+        return sum + (text?.length || 0);
+      }, 0);
+
+      if (userMsgs.length <= 1 && totalUserChars < 200 && assistantCount <= 3 && totalContentChars < 500) {
+        fileDlog(`skip: trivial session (${userMsgs.length} user msgs, ${totalUserChars} user chars, ${assistantCount} assistant, ${totalContentChars} total chars)`);
         return;
       }
 
