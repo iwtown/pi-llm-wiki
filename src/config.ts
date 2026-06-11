@@ -78,6 +78,20 @@ export const PIPELINE_STATUS = {
 /** Compile threshold: trigger obs-compile when raw sessions >= this */
 export const COMPILE_THRESHOLD = 5;
 
+/** LLM configuration for compile-time extraction */
+export const LLM_CONFIG = {
+  /** GLM model for structured extraction during compile */
+  model: "glm-4-flash-250414",
+  /** Zhipu AI API endpoint */
+  endpoint: "https://open.bigmodel.cn/api/paas/v4/chat/completions",
+  /** Environment variable name for API key */
+  keyVar: "ZHIPU_API_KEY",
+  /** Timeout for LLM calls (ms) */
+  timeoutMs: 15_000,
+  /** Max tokens for LLM output */
+  maxTokens: 1000,
+} as const;
+
 /** Single session ingest max chars */
 export const INGEST_MAX_CHARS = 500;
 
