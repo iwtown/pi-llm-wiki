@@ -20,12 +20,12 @@ export const LLM_WIKI = {
   api: "https://localhost:27124",
   /** Bearer token for REST API */
   get key() { return getApiKey(); },
-  /** WSL2 filesystem path to vault */
-  vault: "/mnt/d/DB/Obsidian/LLM-Wiki",
+  /** WSL2 filesystem path to vault — overridable via LLM_WIKI_TEST_VAULT for testing */
+  vault: process.env.LLM_WIKI_TEST_VAULT || "/mnt/d/DB/Obsidian/LLM-Wiki",
   /** Windows path (for Obsidian CLI / URI) */
   vaultWindows: "D:\\DB\\Obsidian\\LLM-Wiki",
   /** External clipping vault (ZInBox) — search-only, no copy */
-  zinbox: "/mnt/d/DB/Obsidian/ZInBox",
+  zinbox: process.env.LLM_WIKI_TEST_ZINBOX || "/mnt/d/DB/Obsidian/ZInBox",
   /** ZInBox compile tracker (small marker files, no content copy) */
   get zinboxIndex() { return this.vault + "/raw/zinbox-index"; },
 };
