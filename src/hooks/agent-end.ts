@@ -60,9 +60,17 @@ function extractObservations(entries: any[]): { obs: OmObservation[]; refs: OmRe
 function extractUserMessages(entries: any[]): string[] {
   const messages: string[] = [];
   for (const e of entries) {
-    if (e.type !== "user") continue;
-    const text = extractMessageText(e.message ?? e);
-    if (text) messages.push(text);
+    // Old format: type="user", message in e.message
+    if (e.type === "user") {
+      const text = extractMessageText(e.message ?? e);
+      if (text) messages.push(text);
+      continue;
+    }
+    // New format: type="message", role in e.message.role
+    if (e.type === "message" && e.message?.role === "user") {
+      const text = extractMessageText(e.message);
+      if (text) messages.push(text);
+    }
   }
   return messages;
 }

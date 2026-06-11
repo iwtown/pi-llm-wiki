@@ -71,9 +71,12 @@ function parseSession(jsonlPath: string): {
         hasIngestMarker = true;
       }
 
-      // Extract user messages
+      // Extract user messages (old format: type="user", new format: type="message", role="user")
       if (entry.type === "user") {
         const text = extractText(entry.message ?? entry);
+        if (text) userMessages.push(text);
+      } else if (entry.type === "message" && entry.message?.role === "user") {
+        const text = extractText(entry.message);
         if (text) userMessages.push(text);
       }
     }
