@@ -9,6 +9,7 @@ import { ingest } from "../tools/ingest";
 import { detectProject } from "../project";
 import { LLM_WIKI } from "../config";
 import { fileDlog, slog } from "../system/log";
+import type { ExtendedContext } from "../types";
 
 const VAULT = LLM_WIKI.vault;
 
@@ -200,7 +201,7 @@ export async function autoIngest(pi: ExtensionAPI): Promise<void> {
   pi.on("agent_end", async (event, ctx) => {
     const startTime = Date.now();
     fileDlog(`agent_end fired, sessionManager=${!!ctx.sessionManager}, getBranch=${typeof ctx.sessionManager?.getBranch}`);
-    const sessionId = (ctx as any).sessionManager?.sessionId ?? "";
+    const sessionId = (ctx as ExtendedContext).sessionManager?.getSessionId?.() ?? (ctx as any).sessionManager?.sessionId ?? "";
     try {
       // Check if obs_ingest was already called this session
       const entries = ctx.sessionManager?.getBranch?.() ?? [];
@@ -231,8 +232,9 @@ export async function autoIngest(pi: ExtensionAPI): Promise<void> {
       }
 
       // Phase 1: Extract parentSessionId from context (for subagent fork detection)
-      const parentSessionId = (ctx as any).parentSessionId ??
-                              (ctx as any).forkParentId ??
+      const extCtx = ctx as ExtendedContext;
+      const parentSessionId = extCtx.parentSessionId ??
+                              extCtx.forkParentId ??
                               "";
       if (parentSessionId) {
         fileDlog(`detected fork session, parentSessionId=${parentSessionId}`);

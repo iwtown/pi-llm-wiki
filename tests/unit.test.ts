@@ -350,6 +350,7 @@ Normal page referencing [[概念/缺失概念-X]].`,
 /* ───────── client.ts (API integration) ───────── */
 
 import { search, smartSearch } from "../src/client";
+import { scoreContent } from "../src/tools/ingest";
 
 describe("search (API integration)", { timeout: 20_000 }, async () => {
   it("performs keyword search via REST API", async () => {
@@ -385,5 +386,74 @@ describe("smartSearch (API integration)", { timeout: 20_000 }, async () => {
         `Expected score[${i}] (${results[i].score}) <= score[${i - 1}] (${results[i - 1].score})`
       );
     }
+  });
+});
+
+/* ───────── ingest.ts / scoreContent ───────── */
+
+describe("scoreContent", () => {
+  it("scores structured content high (>80)", () => {
+    const content = [
+      "## 会话复盘",
+      "",
+      "### 🎯 目标",
+      "",
+      "修复 pi 配置",
+      "",
+      "### ⚖️ 决策",
+      "",
+      "决定采用 option B",
+      "",
+      "### 💡 洞察",
+      "",
+      "发现了一个陷阱",
+      "",
+      "### ⚠️ 遗留",
+      "",
+      "需要验证",
+    ].join("\n");
+    const result = scoreContent(content);
+    assert.ok(result.score >= 80, "Expected high score for structured content, got " + result.score);
+    assert.equal(result.isTrivial, false);
+  });
+
+  it("scores long content without sections as moderate (>30)", () => {
+    const body = "x".repeat(2500);
+    const content = ["## Test", "", body].join("\n");
+    const result = scoreContent(content);
+    assert.ok(result.score >= 30, "Expected moderate score for long content, got " + result.score);
+    assert.equal(result.isTrivial, false);
+  });
+
+  it("marks short empty content as trivial (<30)", () => {
+    const content = "## 测试\n\nhello";
+    const result = scoreContent(content);
+    assert.ok(result.score < 30, "Expected trivial score for short content, got " + result.score);
+    assert.equal(result.isTrivial, true);
+  });
+
+  it("scores content with decisions and insights", () => {
+    const lines = [
+      "## 会话复盘",
+      "",
+      "### 🎯 目标",
+      "",
+      "配置工具",
+      "",
+      "### ⚖️ 决策",
+      "",
+      "选用 A",
+      "",
+      "### 💡 洞察",
+      "",
+      "发现 B",
+    ];
+    const content = lines.join("\n");
+    const result = scoreContent(content);
+    assert.ok(result.score >= 40, "Expected score for content with decisions+insights, got " + result.score);
+    assert.ok(result.score <= 100);
+    assert.equal(result.factors.hasGoal, true);
+    assert.equal(result.factors.hasDecisions, true);
+    assert.equal(result.factors.hasInsights, true);
   });
 });

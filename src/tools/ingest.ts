@@ -8,6 +8,7 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import type { ExtendedContext } from "../types";
 import { writeFile, appendToFile, ping } from "../client";
 import { detectProject } from "../project";
 import { PATHS, INGEST_MAX_CHARS, LLM_WIKI } from "../config";
@@ -151,7 +152,7 @@ export async function ingest(
   const date = new Date().toISOString().split("T")[0];
 
   // Extract parentSessionId from context (for subagent fork detection)
-  const parentSessionId = (ctx as any).parentSessionId ?? "";
+  const parentSessionId = (ctx as ExtendedContext).parentSessionId ?? "";
 
   // Phase 1: Fork detection — if this is a subagent fork, check if parent already ingested
   if (parentSessionId) {
@@ -186,7 +187,7 @@ export async function ingest(
   const fsPath = path.join(VAULT_BASE, vaultPath);
 
   // Extract session ID from context
-  const sessionId = (ctx as any).sessionManager?.sessionId ?? "";
+  const sessionId = (ctx as ExtendedContext).sessionManager?.getSessionId?.() ?? "";
 
   // G7: Check if this session was already ingested (dedup by session_id)
   if (sessionId) {

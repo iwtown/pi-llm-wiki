@@ -18,6 +18,7 @@ import { updateFrontmatter, markWeaved, markLinted } from "../manifest";
 import { collectWikiPages } from "./analyzer";
 import { compile as compileSession } from "../tools/compile";
 import { readChangeLog, getCachedFiles, updateCache, needsFullScan, isRelevantPendingPath, logChange } from "./changes";
+import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { scoreContent } from "../tools/ingest";
 
 const VAULT = LLM_WIKI.vault;
@@ -57,7 +58,7 @@ function appendLog(prefix: string, message: string): void {
         const recentLines = lines.slice(-100);
         fs.writeFileSync(fullPath, [...keepLines, "", `## [${date}] log.md 已归档 (${archiveLines.length} 行)`].join("\n") + "\n", "utf-8");
       }
-    } catch {}
+    } catch { /* 归档非致命 — 当前 log 继续追加 */ }
 
     fs.appendFileSync(fullPath, `## [${date}] ${prefix} | ${message}\n`);
   } catch { /* non-fatal */ }
@@ -159,7 +160,7 @@ async function autoCompile(): Promise<{ wikiPaths: string[]; rawPaths: string[] 
 
   const newWikiPaths: string[] = [];
   const compiledRawPaths: string[] = [];
-  const ctx = { cwd: process.cwd() } as any;
+  const ctx = { cwd: process.cwd() } as ExtensionContext;
 
   for (const rawPath of pending) {
     try {
@@ -470,7 +471,7 @@ ${body.slice(0, 3000)}
           if (insightLines.length > 0) {
             const insightHub = path.join(VAULT, "wiki/索引/zinbox-insights.md");
             let insightContent = "";
-            try { insightContent = fs.readFileSync(insightHub, "utf-8"); } catch {}
+            try { insightContent = fs.readFileSync(insightHub, "utf-8"); } catch { /* 洞察文件不存在正常 */ }
             if (!insightContent.includes(`[[${wikiRelPath.replace(/\.md$/, "")}]]`)) {
               const insightEntry = insightLines.map((l) => `- 💡 ${l} — [[${wikiRelPath.replace(/\.md$/, "")}]]`).join("\n");
               const newSection = `\n### ${now}\n${insightEntry}\n`;
