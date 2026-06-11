@@ -9,6 +9,7 @@ import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { readFile, writeFile, appendToFile } from "../client";
 import { markCompiled } from "../manifest";
 import { PATHS, WIKI_TYPES } from "../config";
+import { logChange } from "../system/changes";
 import { detectProject } from "../project";
 import { collectWikiPages, detectKnowledgeUpgrade, textSimilarity } from "../system/analyzer";
 
@@ -183,6 +184,9 @@ ${linkLines || "暂无关联"}
       // non-fatal
     }
   }
+
+  // Phase 3: Log change for incremental processing
+  logChange({ type: "compile", path: wikiPath, action: "create", timestamp: date, wikiPath });
 
   return {
     rawPath,

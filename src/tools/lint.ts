@@ -219,9 +219,12 @@ export async function lint(
           if (e.endsWith(".md")) {
             try {
               const content = await readFile(full);
-              const compiled = /compiled:\s*true/.test(content);
-              const weaved = /weaved:\s*true/.test(content);
-              const linted = /linted:\s*true/.test(content);
+              // Phase 5: check new status field AND old booleans for backward compat
+              const statusMatch = content.match(/\bstatus:\s*(\S+)/);
+              const status = statusMatch?.[1]?.replace(/["']/g, "") ?? "";
+              const compiled = /compiled:\s*true/.test(content) || ["compiled", "woven", "done"].includes(status);
+              const weaved = /weaved:\s*true/.test(content) || ["woven", "done"].includes(status);
+              const linted = /linted:\s*true/.test(content) || status === "done";
               if (compiled && (!weaved || !linted)) {
                 const status = !weaved ? "已编译未织入" : "已编译未lint";
                 stuckSessions.push({ path: full, status });

@@ -11,8 +11,61 @@ import * as path from "node:path";
 import { writeFile, appendToFile, ping } from "../client";
 import { detectProject } from "../project";
 import { PATHS, INGEST_MAX_CHARS, LLM_WIKI } from "../config";
+import { logChange } from "../system/changes";
 
 const VAULT_BASE = LLM_WIKI.vault;
+
+// ── Phase 4: Session quality scoring ──
+
+export interface SessionScore {
+  score: number; // 0-100
+  isTrivial: boolean; // score < 30
+  factors: {
+    hasGoal: boolean;
+    hasDecisions: boolean;
+    hasInsights: boolean;
+    hasIssues: boolean;
+    totalChars: number;
+    sectionCount: number;
+  };
+}
+
+/** Score session content quality on a 0-100 scale */
+export function scoreContent(content: string): SessionScore {
+  const body = content;
+  const totalChars = body.length;
+
+  // Check for structured sections
+  const hasGoal = /### 🎯/.test(body);
+  const hasDecisions = /### ⚖️|决定|选择|采用|配置|安装/.test(body);
+  const hasInsights = /### 💡|发现|注意|陷阱|洞察|教训/.test(body);
+  const hasIssues = /### ⚠️|遗留|问题|todo|TODO/.test(body);
+  const sectionCount = [hasGoal, hasDecisions, hasInsights, hasIssues].filter(Boolean).length;
+
+  // Scoring algorithm
+  let score = 0;
+
+  // Content volume
+  if (totalChars > 300) score += 10;
+  if (totalChars > 800) score += 10;
+  if (totalChars > 2000) score += 10;
+
+  // Structured sections (each adds value)
+  if (hasGoal) score += 15;
+  if (hasDecisions) score += 20;
+  if (hasInsights) score += 15;
+  if (hasIssues) score += 10;
+
+  // Multiple sections = richer content
+  if (sectionCount >= 2) score += 10;
+  if (sectionCount >= 3) score += 10;
+
+  return {
+    score: Math.min(100, score),
+    isTrivial: score < 30,
+    factors: { hasGoal, hasDecisions, hasInsights, hasIssues, totalChars, sectionCount },
+  };
+}
 
 function buildTemplate(
   firstLine: string,
@@ -20,16 +73,24 @@ function buildTemplate(
   date: string,
   sessionId: string,
   content: string,
+  sessionScore: number,
+  isTrivial: boolean,
+  parentSessionId?: string,
 ): string {
+  const tagSuffix = parentSessionId ? ", fork-session" : "";
+  const parentField = parentSessionId ? `parent_session_id: "${parentSessionId}"` : "";
   return `---
 title: "${firstLine}"
 project: "${projectName}"
 date: ${date}
 session_id: "${sessionId}"
+${parentField}
+session_score: ${sessionScore}
+trivial: ${isTrivial}
 compiled: false
 weaved: false
 linted: false
-tags: [session, ${projectName}]
+tags: [session, ${projectName}${tagSuffix}]
 ---
 
 # ${firstLine}
@@ -66,6 +127,21 @@ async function writeWithFallback(
   }
 }
 
+/** Check if the parent session (or its direct child) has already been ingested */
+function checkParentIngested(parentSessionId: string, projectName: string): boolean {
+  const rawDir = path.join(VAULT_BASE, PATHS.rawSessions, projectName);
+  try {
+    const existing = fs.readdirSync(rawDir).filter((f) => f.endsWith(".md"));
+    for (const f of existing) {
+      const fileContent = fs.readFileSync(path.join(rawDir, f), "utf-8");
+      if (fileContent.includes(`session_id: "${parentSessionId}"`)) {
+        return true;
+      }
+    }
+  } catch { /* dir may not exist yet */ }
+  return false;
+}
+
 export async function ingest(
   content: string,
   ctx: ExtensionContext
@@ -74,10 +150,33 @@ export async function ingest(
   const projectName = project?.name ?? "unknown";
   const date = new Date().toISOString().split("T")[0];
 
+  // Extract parentSessionId from context (for subagent fork detection)
+  const parentSessionId = (ctx as any).parentSessionId ?? "";
+
+  // Phase 1: Fork detection — if this is a subagent fork, check if parent already ingested
+  if (parentSessionId) {
+    const parentDone = checkParentIngested(parentSessionId, projectName);
+    if (parentDone) {
+      console.log(`[pi-llm-wiki] Fork session (parent=${parentSessionId}): skipped (parent already ingested)`);
+      return { path: "", project: projectName, writeMode: "skip" };
+    }
+  }
+
+  // Phase 4: Score session content quality — skip trivial sessions
+  const contentLines = content.split("\n").filter((l) => l.trim() && !l.trim().startsWith("---"));
+  const topicLine = (contentLines[0] ?? "").replace(/^#+\s*/, "").trim() || "session";
+  const score = scoreContent(content);
+  if (score.isTrivial) {
+    console.log(`[pi-llm-wiki] Trivial session skipped (score: ${score.score}/100): "${topicLine.slice(0, 60)}"`);
+    try {
+      const logPath = path.join(process.env.HOME ?? "/home", ".pi/agent/pi-llm-wiki-debug.log");
+      fs.appendFileSync(logPath, `[trivial-skip] score=${score.score} project=${projectName}\n`);
+    } catch { /* non-fatal */ }
+    return { path: "", project: projectName, writeMode: "skip" };
+  }
+
   // Build safe filename from first meaningful line + timestamp to avoid collisions
-  // B1 fix: skip leading YAML frontmatter (---) and empty lines
-  const lines = content.split("\n").filter((l) => l.trim() && !l.trim().startsWith("---"));
-  const firstLine = (lines[0] ?? "").replace(/^#+\s*/, "").trim() || "session";
+  const firstLine = topicLine;
   const safeTopic = firstLine.replace(/[^a-zA-Z0-9\u4e00-\u9fff_-]/g, "-").slice(0, 50);
   // B3 fix: ensure safeTopic is non-empty for filename
   const safeTopicClean = safeTopic.trim() || "session";
@@ -95,8 +194,8 @@ export async function ingest(
     try {
       const existing = fs.readdirSync(rawDir).filter((f) => f.endsWith(".md"));
       for (const f of existing) {
-        const content = fs.readFileSync(path.join(rawDir, f), "utf-8");
-        if (content.includes(`session_id: "${sessionId}"`)) {
+        const fileContent = fs.readFileSync(path.join(rawDir, f), "utf-8");
+        if (fileContent.includes(`session_id: "${sessionId}"`)) {
           console.error(`[pi-llm-wiki] Session ${sessionId} already ingested, skipping`);
           return { path: vaultPath, project: projectName, writeMode: "skip" };
         }
@@ -105,7 +204,7 @@ export async function ingest(
   }
 
   // B2 fix: template already includes Task checkbox — no need to append again
-  const template = buildTemplate(firstLine, projectName, date, sessionId, content);
+  const template = buildTemplate(firstLine, projectName, date, sessionId, content, score.score, score.isTrivial, parentSessionId || undefined);
 
   const writeMode = await writeWithFallback(vaultPath, fsPath, template);
   if (writeMode === "fail") {
@@ -130,6 +229,9 @@ export async function ingest(
       // log write failure is non-fatal
     }
   }
+
+  // Phase 3: Log change for incremental processing (skip path returns early above)
+  logChange({ type: "ingest", path: vaultPath, action: "create", timestamp: date });
 
   return { path: vaultPath, project: projectName, writeMode };
 }

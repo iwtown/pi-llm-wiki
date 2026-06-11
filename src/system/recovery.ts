@@ -27,7 +27,8 @@ export interface RecoveryResult {
 
 /**
  * Scan for stuck sessions and attempt pipeline recovery.
- * Session is "stuck" if compiled=true but weaved=false or linted=false.
+ * Session is "stuck" if compiled (status=compiled/woven or compiled=true) but not yet woven (status=woven or weaved=true)
+ * or linted (status=done or linted=true). Checks both old 3-boolean and new unified status field.
  */
 export async function recoverPipeline(
   ctx?: ExtensionContext

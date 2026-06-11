@@ -85,11 +85,20 @@ export function generateStatus(): string {
   const now = new Date().toISOString().split("T")[0];
   const agentEnd = readAgentEndStats();
 
-  // ── Compute pipeline stats ──
+  // ── Compute pipeline stats (Phase 5: check status field + old booleans) ──
   const total = rawFiles.length;
-  const compiled = rawFiles.filter((r) => String(r.fm.compiled) === "true").length;
-  const weaved = rawFiles.filter((r) => String(r.fm.weaved) === "true").length;
-  const linted = rawFiles.filter((r) => String(r.fm.linted) === "true").length;
+  const compiled = rawFiles.filter((r) =>
+    String(r.fm.compiled) === "true" ||
+    ["compiled", "woven", "done", "skipped"].includes(String(r.fm.status))
+  ).length;
+  const weaved = rawFiles.filter((r) =>
+    String(r.fm.weaved) === "true" ||
+    ["woven", "done"].includes(String(r.fm.status))
+  ).length;
+  const linted = rawFiles.filter((r) =>
+    String(r.fm.linted) === "true" ||
+    r.fm.status === "done"
+  ).length;
   const pendingCompile = total - compiled;
   const pendingWeave = compiled - weaved;
   const pendingLint = weaved - linted;

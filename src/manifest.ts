@@ -4,7 +4,7 @@
  */
 
 import { readFile, writeFile } from "./client";
-import { PATHS } from "./config";
+import { PATHS, type PipelineStatus } from "./config";
 import { parseFrontmatter } from "./system/parse";
 
 export { parseFrontmatter };
@@ -14,6 +14,7 @@ export interface SessionStatus {
   compiled: boolean;
   weaved: boolean;
   linted: boolean;
+  status?: PipelineStatus; // Phase 5: unified status field
   title?: string;
   project?: string;
 }
@@ -49,13 +50,15 @@ export function quoteYaml(v: unknown): string {
 /** Mark a session as compiled, with optional compile target and linked pages */
 export async function markCompiled(
   sessionPath: string,
-  options?: { compiledTo?: string; linkedTo?: string[] }
+  options?: { compiledTo?: string; linkedTo?: string[]; skipped?: string }
 ): Promise<void> {
   const content = await readFile(sessionPath);
   const updates: Record<string, unknown> = {
     compiled: true,
     updated: new Date().toISOString().split("T")[0],
   };
+  // Phase 5: set unified status field
+  updates.status = options?.skipped ? "skipped" : "compiled";
   if (options?.compiledTo) updates.compiled_to = options.compiledTo;
   if (options?.linkedTo && options.linkedTo.length > 0) {
     updates.linked_to = options.linkedTo;
@@ -67,20 +70,20 @@ export async function markCompiled(
 /** Mark a session as weaved */
 export async function markWeaved(sessionPath: string): Promise<void> {
   const content = await readFile(sessionPath);
-  const updated = updateFrontmatter(content, { weaved: true });
+  const updated = updateFrontmatter(content, { weaved: true, status: "woven" });
   await writeFile(sessionPath, updated);
 }
 
-/** Mark a session as linted */
+/** Mark a session as linted (pipeline complete) */
 export async function markLinted(sessionPath: string): Promise<void> {
   const content = await readFile(sessionPath);
-  const updated = updateFrontmatter(content, { linted: true });
+  const updated = updateFrontmatter(content, { linted: true, status: "done" });
   await writeFile(sessionPath, updated);
 }
 
 /** Find sessions stuck in pipeline: compiled but not weaved or not linted */
 export async function getStuckSessions(): Promise<
-  Array<{ path: string; hasWeaved: boolean; hasLinted: boolean; compiledTo?: string; linkedTo?: string[] }>
+  Array<{ path: string; hasWeaved: boolean; hasLinted: boolean; compiledTo?: string; linkedTo?: string[]; status?: string }>
 > {
   const { listDir } = await import("./client");
   const stuck: Array<{
@@ -89,6 +92,7 @@ export async function getStuckSessions(): Promise<
     hasLinted: boolean;
     compiledTo?: string;
     linkedTo?: string[];
+    status?: string;
   }> = [];
 
   async function walk(dir: string) {
@@ -99,16 +103,24 @@ export async function getStuckSessions(): Promise<
         if (e.endsWith(".md")) {
           const content = await readFile(full);
           const fm = parseFrontmatter(content);
-          if (fm.compiled === true || fm.compiled === "true") {
-            const hasWeaved = fm.weaved === true || fm.weaved === "true";
-            const hasLinted = fm.linted === true || fm.linted === "true";
-            if (!hasWeaved || !hasLinted) {
+          const status = fm.status as string | undefined;
+          // Check old-style booleans OR new-style status field
+          const isCompiled = (fm.compiled === true || fm.compiled === "true")
+            || status === "compiled" || status === "woven" || status === "done";
+          if (isCompiled) {
+            const isDone = status === "done" || status === "skipped"
+              || (fm.weaved === true || fm.weaved === "true")
+              && (fm.linted === true || fm.linted === "true");
+            if (!isDone) {
+              const hasWeaved = fm.weaved === true || fm.weaved === "true" || status === "woven";
+              const hasLinted = fm.linted === true || fm.linted === "true" || status === "done";
               stuck.push({
                 path: full,
                 hasWeaved,
                 hasLinted,
                 compiledTo: fm.compiled_to as string | undefined,
                 linkedTo: Array.isArray(fm.linked_to) ? (fm.linked_to as string[]) : undefined,
+                status,
               });
             }
           }
@@ -147,13 +159,16 @@ export async function getUncompiledSessions(): Promise<string[]> {
 
   await walk(PATHS.rawSessions);
 
-  // Check frontmatter for compiled status
+  // Check frontmatter for compiled status (new status field + old boolean compat)
   const uncompiled: string[] = [];
   for (const f of allFiles) {
     try {
       const content = await readFile(f);
       const fm = parseFrontmatter(content);
-      if (!fm.compiled || fm.compiled === "false" || fm.compiled === false) {
+      const status = fm.status as string | undefined;
+      const isCompiled = (fm.compiled === true || fm.compiled === "true")
+        || status === "compiled" || status === "woven" || status === "done" || status === "skipped";
+      if (!isCompiled) {
         uncompiled.push(f);
       }
     } catch {

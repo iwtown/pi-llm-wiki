@@ -14,7 +14,11 @@ import * as path from "node:path";
 import { LLM_WIKI, COMPILE_THRESHOLD } from "../config";
 import { generateStatus, autoLint } from "./status";
 import { parseFrontmatter } from "./parse";
+import { updateFrontmatter, markWeaved, markLinted } from "../manifest";
 import { collectWikiPages } from "./analyzer";
+import { compile as compileSession } from "../tools/compile";
+import { readChangeLog, getCachedFiles, updateCache, needsFullScan, isRelevantPendingPath, logChange } from "./changes";
+import { scoreContent } from "../tools/ingest";
 
 const VAULT = LLM_WIKI.vault;
 
@@ -24,27 +28,7 @@ function writeSystemPage(relPath: string, content: string): void {
   fs.writeFileSync(fullPath, content, "utf-8");
 }
 
-/** Read a compile template from vault and fill placeholders */
-function applyTemplate(templateName: string, vars: Record<string, string>): string {
-  const templatePath = path.join(VAULT, `templates/${templateName}`);
-  try {
-    let tpl = fs.readFileSync(templatePath, "utf-8");
-    // Remove frontmatter if present
-    tpl = tpl.replace(/^---\n[\s\S]*?\n---\n?/, "");
-    for (const [k, v] of Object.entries(vars)) {
-      tpl = tpl.replace(new RegExp(`\\{\\{${k}\\}\\}`, "g"), v);
-    }
-    // Add frontmatter from vars
-    const fm = Object.entries(vars)
-      .filter(([k]) => !["body"].includes(k))
-      .map(([k, v]) => `${k}: "${v.replace(/"/g, '\\"')}"`)
-      .join("\n");
-    return `---\n${fm}\n---\n\n${tpl}`;
-  } catch {
-    // Template not found — return empty (caller handles)
-    return "";
-  }
-}
+
 
 function appendLog(prefix: string, message: string): void {
   try {
@@ -79,9 +63,10 @@ function appendLog(prefix: string, message: string): void {
   } catch { /* non-fatal */ }
 }
 
-// ── Auto-detect: scan for pending sessions ──
+// ── Auto-detect: scan for pending sessions (Phase 3: incremental) ──
 
-function scanPendingSessions(): string[] {
+/** Legacy full scan — reads every file to find pending sessions */
+function fullScanPending(): string[] {
   const base = path.join(VAULT, "raw/sessions");
   const pending: string[] = [];
   try {
@@ -92,7 +77,11 @@ function scanPendingSessions(): string[] {
         if (!f.endsWith(".md")) continue;
         const content = fs.readFileSync(path.join(projDir, f), "utf-8");
         const fm = parseFrontmatter(content);
-        if (String(fm.compiled) !== "true") {
+        // Phase 5: check unified status field first, fall back to old boolean
+        const status = String(fm.status ?? "");
+        const isCompiled = status === "compiled" || status === "woven" || status === "done" || status === "skipped"
+          || String(fm.compiled) === "true";
+        if (!isCompiled) {
           pending.push(`raw/sessions/${proj}/${f}`);
         }
       }
@@ -101,84 +90,137 @@ function scanPendingSessions(): string[] {
   return pending;
 }
 
-// ── Auto-compile ──
+/** Incremental scan — only checks files in the change log */
+function incrementalScanPending(): string[] {
+  const cl = readChangeLog();
+  const pending = new Set<string>();
 
-function autoCompile(): string[] {
+  for (const change of cl.changes) {
+    if (change.type === "ingest" && change.action === "create") {
+      if (!isRelevantPendingPath(change.path)) continue;
+      // Quick check: is it still pending?
+      const fullPath = path.join(VAULT, change.path);
+      try {
+        if (!fs.existsSync(fullPath)) continue;
+        const content = fs.readFileSync(fullPath, "utf-8");
+        const fm = parseFrontmatter(content);
+        // Phase 5: check unified status field first, fall back to old boolean
+        const status = String(fm.status ?? "");
+        const isCompiled = status === "compiled" || status === "woven" || status === "done" || status === "skipped"
+          || String(fm.compiled) === "true";
+        if (!isCompiled) {
+          pending.add(change.path);
+        }
+      } catch { /* skip unreadable */ }
+    }
+  }
+
+  return [...pending];
+}
+
+function scanPendingSessions(): string[] {
+  // Use incremental scan if cache is fresh, fall back to full scan
+  if (needsFullScan()) {
+    const pending = fullScanPending();
+    // Rebuild cache
+    const allRaw: string[] = [];
+    const allWiki: string[] = [];
+    const base = path.join(VAULT, "raw/sessions");
+    try {
+      for (const proj of fs.readdirSync(base)) {
+        const projDir = path.join(base, proj);
+        if (!fs.statSync(projDir).isDirectory()) continue;
+        for (const f of fs.readdirSync(projDir)) {
+          if (f.endsWith(".md")) allRaw.push(`raw/sessions/${proj}/${f}`);
+        }
+      }
+      const wikiBase = path.join(VAULT, "wiki");
+      function walk(d: string) {
+        for (const e of fs.readdirSync(d)) {
+          const full = path.join(d, e);
+          if (fs.statSync(full).isDirectory()) walk(full);
+          else if (e.endsWith(".md")) allWiki.push(path.relative(VAULT, full));
+        }
+      }
+      walk(wikiBase);
+    } catch { /* skip */ }
+    updateCache(allRaw, allWiki);
+    return pending;
+  }
+
+  return incrementalScanPending();
+}
+
+// ── Auto-compile (Phase 2: delegates to compile.ts) ──
+
+async function autoCompile(): Promise<{ wikiPaths: string[]; rawPaths: string[] }> {
   const pending = scanPendingSessions();
-  if (pending.length < COMPILE_THRESHOLD) return [];
+  if (pending.length < COMPILE_THRESHOLD) return { wikiPaths: [], rawPaths: [] };
 
-  const now = new Date().toISOString().split("T")[0];
-  const allWikiPages = collectWikiPages();
-  const existingPaths = new Set(allWikiPages.map((p) => p.path.replace(/\.md$/, "")));
-  const existingTitles = new Set(allWikiPages.map((p) => p.title));
   const newWikiPaths: string[] = [];
+  const compiledRawPaths: string[] = [];
+  const ctx = { cwd: process.cwd() } as any;
 
   for (const rawPath of pending) {
     try {
-      const fullPath = path.join(VAULT, rawPath);
-      const content = fs.readFileSync(fullPath, "utf-8");
-      const fm = parseFrontmatter(content);
-      if (String(fm.compiled) === "true") continue;
+      // Phase 4: Skip trivial sessions (score < 30 or marked trivial)
+      const rawFullPath = path.join(VAULT, rawPath);
+      if (fs.existsSync(rawFullPath)) {
+        const rawContent = fs.readFileSync(rawFullPath, "utf-8");
+        const rawFm = parseFrontmatter(rawContent);
+        if (rawFm.trivial === true || rawFm.trivial === "true" || rawFm.skipped === "trivial") {
+          // Phase 5: Mark as compiled+skipped to avoid re-scanning, using frontmatter update
+          const updated = updateFrontmatter(rawContent, { compiled: true, status: "skipped" });
+          fs.writeFileSync(rawFullPath, updated, "utf-8");
+          appendLog("compile", `${rawPath} → (跳过，trivial session)`);
+          continue;
+        }
+      }
 
-      const title = String(fm.title ?? "").trim() || path.basename(rawPath, ".md");
-      const project = String(fm.project ?? "unknown").trim();
-      const bodyMatch = content.match(/^---\n[\s\S]*?\n---\n?([\s\S]*)$/);
-      const body = bodyMatch ? bodyMatch[1].trim() : "";
+      // Delegate to compile.ts — it handles dedup, insight extraction,
+      // knowledge upgrade detection, and marks raw as compiled
+      const result = await compileSession(rawPath, {}, ctx);
 
-      // Determine wiki category from body content
-      const insightTypes: string[] = [];
-      if (/决策|决定|选择/.test(body)) insightTypes.push("决策");
-      if (/发现|陷阱|注意|教训/.test(body)) insightTypes.push("发现");
-      if (/概念|理解|本质/.test(body)) insightTypes.push("概念");
-      if (/步骤|流程|方法|如何/.test(body)) insightTypes.push("流程");
-      if (/命令|CLI|命令行|快捷/.test(body)) insightTypes.push("命令");
-      const wikiDir = project !== "unknown" && insightTypes.length === 0
-        ? `项目/${project}`
-        : (insightTypes[0] ?? "发现");
-      const wikiFileName = title.replace(/[/\\?%*:|"<>]/g, "-").replace(/\s+/g, "-").slice(0, 80) || "untitled";
-      const wikiRelPath = wikiDir.startsWith("项目/")
-        ? `wiki/项目/${project}/${wikiFileName}.md`
-        : `wiki/${wikiDir}/${wikiFileName}.md`;
-
-      // Avoid re-creating existing topics
-      if (existingPaths.has(wikiRelPath.replace(/\.md$/, "")) || existingTitles.has(title)) {
-        // Just mark raw as compiled
-        const updated = content.includes("compiled: false")
-          ? content.replace("compiled: false", "compiled: true")
-          : content;
-        fs.writeFileSync(fullPath, updated, "utf-8");
-        appendLog("compile", `${rawPath} → (跳过，已存在类似页面)`);
+      if (result?.dedupSuggestion) {
+        // Similar page exists; compile.ts already marked raw as compiled
+        appendLog("compile", `${rawPath} → (跳过，${result.dedupSuggestion.slice(0, 80)})`);
         continue;
       }
 
-      // Build wiki page from template
-      const templateName = wikiDir.startsWith("项目/") ? "compile-项目.md" : `compile-${wikiDir}.md`;
-      const wikiContent = applyTemplate(templateName, {
-        title: title.replace(/"/g, '\\"'),
-        project,
-        source: rawPath,
-        created: now,
-        body,
-      });
-
-      const wikiFullPath = path.join(VAULT, wikiRelPath);
-      fs.mkdirSync(path.dirname(wikiFullPath), { recursive: true });
-      fs.writeFileSync(wikiFullPath, wikiContent, "utf-8");
-      newWikiPaths.push(wikiRelPath);
-
-      // Mark raw as compiled
-      const updated = content.includes("compiled: false")
-        ? content.replace("compiled: false", "compiled: true")
-        : content;
-      fs.writeFileSync(fullPath, updated, "utf-8");
-
-      appendLog("compile", `${rawPath} → ${wikiRelPath}`);
+      if (result?.wikiPath) {
+        newWikiPaths.push(result.wikiPath);
+        compiledRawPaths.push(rawPath);
+        appendLog("compile", `${rawPath} → ${result.wikiPath}`);
+      }
     } catch (e: any) {
       console.error(`[pi-llm-wiki] auto-compile error for ${rawPath}: ${e.message}`);
     }
   }
 
-  return newWikiPaths;
+  // Also mark any pending sessions that are in the "fork-merged" or "trivial"
+  // state — they were marked compiled in Phase 0 but may still appear pending
+  // if the frontmatter format doesn't match compile.ts expectations.
+  // This re-check is harmless and covers edge cases from Phase 0.
+  for (const rawPath of pending) {
+    try {
+      const fullPath = path.join(VAULT, rawPath);
+      if (fs.existsSync(fullPath)) {
+        const content = fs.readFileSync(fullPath, "utf-8");
+        const fm = parseFrontmatter(content);
+        // Skip sessions already marked as compiled, fork-merged, or trivial
+        if (fm.skipped === "fork-merged" || fm.skipped === "trivial") {
+          const skipStatus = fm.skipped === "trivial" ? "skipped" : "compiled";
+          if (String(fm.compiled) !== "true" || String(fm.status ?? "") !== skipStatus) {
+            // Phase 5: Ensure both old boolean and new status field are set
+            const updated = updateFrontmatter(content, { compiled: true, status: skipStatus });
+            fs.writeFileSync(fullPath, updated, "utf-8");
+          }
+        }
+      }
+    } catch { /* skip */ }
+  }
+
+  return { wikiPaths: newWikiPaths, rawPaths: compiledRawPaths };
 }
 
 // ── Auto-weave: append backlinks to pages referenced by new wiki pages ──
@@ -249,14 +291,31 @@ function autoWeave(newWikiPaths: string[]): number {
   return updated;
 }
 
-// ── ZInBox auto-compile (compile clippings into wiki without copying to raw/) ──
+// ── ZInBox auto-compile (Phase 5: + score gate + incremental + insight extraction) ──
+
+const ZINBOX_LAST_SCAN = path.join(process.env.HOME ?? "/home", ".pi/agent/zinbox-last-scan.json");
+
+function readZinboxLastScan(): number {
+  try { return JSON.parse(fs.readFileSync(ZINBOX_LAST_SCAN, "utf-8")).timestamp ?? 0; } catch { return 0; }
+}
+
+function writeZinboxLastScan(): void {
+  try {
+    fs.mkdirSync(path.dirname(ZINBOX_LAST_SCAN), { recursive: true });
+    fs.writeFileSync(ZINBOX_LAST_SCAN, JSON.stringify({ timestamp: Date.now() }));
+  } catch { /* non-fatal */ }
+}
 
 function autoCompileZinbox(): string[] {
   const zinboxDir = LLM_WIKI.zinbox;
   const indexDir = LLM_WIKI.zinboxIndex;
   fs.mkdirSync(indexDir, { recursive: true });
 
-  // Scan ZInBox for .md files
+  // Phase 5: Incremental scan — only process files modified since last scan
+  const lastScanTs = readZinboxLastScan();
+  const now = new Date().toISOString().split("T")[0];
+
+  // Scan ZInBox for .md files (filter by mtime if we have a previous scan)
   const allZinboxFiles: string[] = [];
   try {
     for (const entry of fs.readdirSync(zinboxDir)) {
@@ -265,17 +324,31 @@ function autoCompileZinbox(): string[] {
       if (entry === "00 Index.md" || entry === "00-Index.md") continue;
       if (fs.statSync(full).isDirectory()) {
         for (const sub of fs.readdirSync(full)) {
-          if (sub.endsWith(".md")) allZinboxFiles.push(path.join(full, sub));
+          if (sub.endsWith(".md")) {
+            const subFull = path.join(full, sub);
+            if (lastScanTs > 0 && fs.statSync(subFull).mtimeMs < lastScanTs) continue;
+            allZinboxFiles.push(subFull);
+          }
         }
       } else if (entry.endsWith(".md")) {
+        if (lastScanTs > 0 && fs.statSync(full).mtimeMs < lastScanTs) continue;
         allZinboxFiles.push(full);
       }
     }
   } catch { return []; }
 
+  // If no new files and we have a previous scan, skip entirely
+  if (allZinboxFiles.length === 0 && lastScanTs > 0) {
+    // 24h full-scan fallback — reset if scan data is old
+    const scanAge = Date.now() - lastScanTs;
+    if (scanAge > 24 * 60 * 60 * 1000) {
+      writeZinboxLastScan(); // reset timestamp so next run rescans
+    }
+    return [];
+  }
+
   // Find uncompiled files
   const existingIndexes = new Set(fs.readdirSync(indexDir));
-  const now = new Date().toISOString().split("T")[0];
   const existingPaths = new Set(collectWikiPages().map((p) => p.path.replace(/\.md$/, "")));
   const existingTitles = new Set(collectWikiPages().map((p) => p.title));
   const newWikiPaths: string[] = [];
@@ -317,6 +390,19 @@ function autoCompileZinbox(): string[] {
       const bodyMatch = content.match(/^---\n[\s\S]*?\n---\n?([\s\S]*)$/);
       const body = (bodyMatch ? bodyMatch[1].trim() : content).slice(0, 3000);
 
+      // Phase 5: Score gate — skip trivial ZInBox content
+      const zbScore = scoreContent(body);
+      if (zbScore.isTrivial) {
+        console.log(`[pi-llm-wiki] ZInBox skip (trivial, score=${zbScore.score}): ${rel}`);
+        fs.writeFileSync(
+          path.join(indexDir, markerName),
+          `---\nsource: "zinbox://${rel}"\ncompiled: true\nskipped: trivial\nscore: ${zbScore.score}\n---\n`,
+          "utf-8"
+        );
+        existingIndexes.add(markerName);
+        continue;
+      }
+
       // Determine wiki type
       const typeHints: string[] = [];
       if (/决策|决定|选择|改用|配置/.test(body)) typeHints.push("决策");
@@ -340,45 +426,63 @@ function autoCompileZinbox(): string[] {
         continue;
       }
 
-      // Create wiki page from template
-      const wikiContent = applyTemplate(`compile-${wikiDir}.md`, {
-        title: title.replace(/"/g, '\\"'),
-        project: "zinbox",
-        source: `zinbox://${rel}`,
-        created: now,
-        body: body.slice(0, 3000),
-      });
+      // Create wiki page directly (no template — Phase 2: remove applyTemplate dependency)
+      const wikiContent = `---
+title: "${title.replace(/"/g, '\\"')}"
+tags: [wiki/${wikiDir}, compiled, zinbox]
+type: "${wikiDir}"
+project: "zinbox"
+source: "zinbox://${rel}"
+created: ${now}
+compiled: ${now}
+---
+
+# ${title}
+
+${body.slice(0, 3000)}
+`;
 
       const wikiFullPath = path.join(VAULT, wikiRelPath);
       fs.mkdirSync(path.dirname(wikiFullPath), { recursive: true });
       fs.writeFileSync(wikiFullPath, wikiContent, "utf-8");
       newWikiPaths.push(wikiRelPath);
 
-      // Append backlink to ZInBox hub page
-      try {
-        const hubPath = path.join(VAULT, "wiki/索引/ZInBox.md");
-        if (fs.existsSync(hubPath)) {
-          let hubContent = fs.readFileSync(hubPath, "utf-8");
-          const logEntry = `- [[${wikiRelPath.replace(/\.md$/, "")}]] auto-compile (${now})`;
-          if (!hubContent.includes(logEntry)) {
-            if (hubContent.includes("## 📋 经验日志")) {
-              hubContent = hubContent.replace("## 📋 经验日志", `## 📋 经验日志\n${logEntry}`);
-            } else {
-              hubContent = hubContent.trimEnd() + `\n\n## 📋 经验日志\n${logEntry}\n`;
-            }
-            fs.writeFileSync(hubPath, hubContent, "utf-8");
-          }
-        }
-      } catch {}
-
       // Create marker
       fs.writeFileSync(
         path.join(indexDir, markerName),
-        `---\nsource: "zinbox://${rel}"\ncompiled: true\nwiki: "${wikiRelPath}"\n---\n`,
+        `---\nsource: "zinbox://${rel}"\ncompiled: true\nwiki: "${wikiRelPath}"\nscore: ${zbScore.score}\n---\n`,
         "utf-8"
       );
       existingIndexes.add(markerName);
       compiled++;
+
+      // Phase 5: Log to change log for incremental processing
+      logChange({ type: "compile", path: wikiRelPath, action: "create", timestamp: now });
+
+      // Phase 5: Extract insights from ZInBox content into hub page
+      if (/💡|发现|陷阱|注意|教训|洞察/i.test(body)) {
+        try {
+          const insightLines = body.split("\n")
+            .filter((l) => /💡|发现|陷阱|注意|教训|洞察/i.test(l))
+            .map((l) => l.replace(/^[-*#]\s*/, "").trim())
+            .filter((l) => l.length > 5)
+            .slice(0, 3);
+          if (insightLines.length > 0) {
+            const insightHub = path.join(VAULT, "wiki/索引/zinbox-insights.md");
+            let insightContent = "";
+            try { insightContent = fs.readFileSync(insightHub, "utf-8"); } catch {}
+            if (!insightContent.includes(`[[${wikiRelPath.replace(/\.md$/, "")}]]`)) {
+              const insightEntry = insightLines.map((l) => `- 💡 ${l} — [[${wikiRelPath.replace(/\.md$/, "")}]]`).join("\n");
+              const newSection = `\n### ${now}\n${insightEntry}\n`;
+              fs.mkdirSync(path.dirname(insightHub), { recursive: true });
+              if (!insightContent.includes("# ZInBox 洞察")) {
+                insightContent = `# ZInBox 洞察\n\n> 自动提取自 ZInBox 剪藏的有价值内容\n`;
+              }
+              fs.writeFileSync(insightHub, insightContent + newSection, "utf-8");
+            }
+          }
+        } catch { /* non-fatal */ }
+      }
     } catch (e: any) {
       // Skip unreadable files silently
     }
@@ -386,6 +490,11 @@ function autoCompileZinbox(): string[] {
 
   if (compiled > 0) {
     appendLog("compile", `ZInBox: ${compiled} clippings compiled to wiki`);
+  }
+  // Phase 5: Record last scan timestamp only if no batch limit was hit
+  // If more files remain, don't advance — they'll be picked up next run
+  if (compiled < BATCH_LIMIT || allZinboxFiles.length <= BATCH_LIMIT) {
+    writeZinboxLastScan();
   }
   return newWikiPaths;
 }
@@ -411,8 +520,8 @@ export function refreshSystemPages(pi: ExtensionAPI): void {
   pi.on("before_agent_start", async () => {
     try {
       // Step 1: Auto-compile (if enough pending raw sessions)
-      const rawPages = autoCompile();
-      let newPages = rawPages;
+      const { wikiPaths, rawPaths } = await autoCompile();
+      let newPages = [...wikiPaths];
 
       // Step 1b: ZInBox auto-compile (external clippings, no copy to raw/)
       const zinboxPages = autoCompileZinbox();
@@ -427,6 +536,18 @@ export function refreshSystemPages(pi: ExtensionAPI): void {
         // Step 2: Auto-weave backlinks
         const woven = autoWeave(newPages);
         console.error(`[pi-llm-wiki] Auto-weave: ${woven} backlinks`);
+
+        // Phase 5: Advance pipeline state — mark all compiled sessions as woven + linted
+        // since the full auto-pipeline (compile → weave → lint → status) ran in one pass
+        for (const rawPath of rawPaths) {
+          try {
+            await markWeaved(rawPath);
+            await markLinted(rawPath);
+          } catch { /* non-fatal */ }
+        }
+        if (rawPaths.length > 0) {
+          console.error(`[pi-llm-wiki] Pipeline: ${rawPaths.length} sessions advanced to done`);
+        }
       }
 
       // Step 3: Auto-lint (always, to keep log.md up-to-date)

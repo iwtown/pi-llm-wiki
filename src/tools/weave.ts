@@ -9,6 +9,7 @@ import { readFile, writeFile } from "../client";
 import { markWeaved } from "../manifest";
 import { PATHS, ANALYSIS } from "../config";
 import { collectWikiPages, findRelatedPages } from "../system/analyzer";
+import { logChange } from "../system/changes";
 
 export interface WeaveResult {
   updatedPages: string[];
@@ -120,6 +121,12 @@ export async function weave(
     } catch {
       // non-fatal — deep weave is best-effort
     }
+  }
+
+  // Phase 3: Log changes for incremental processing
+  const date = new Date().toISOString().split("T")[0];
+  for (const page of updatedPages) {
+    logChange({ type: "weave", path: page, action: "update", timestamp: date });
   }
 
   return { updatedPages, errors };

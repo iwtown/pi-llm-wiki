@@ -47,6 +47,8 @@ export const PATHS = {
   debug: path.join(HOME, ".pi/agent/pi-llm-wiki-debug.log"),
   /** Structured JSON log (for dashboard consumption) */
   structured: path.join(HOME, ".pi/agent/pi-llm-wiki.log"),
+  /** Change log for incremental processing (Phase 3) */
+  changes: path.join(HOME, ".pi/agent/pi-llm-wiki-changes.json"),
 };
 
 export const WIKI_TYPES = [
@@ -62,6 +64,17 @@ export const WIKI_TYPES = [
   "引用",
 ] as const;
 
+/** Pipeline status enum (Phase 5: replaces compiled/weaved/linted booleans) */
+export type PipelineStatus = 'pending' | 'compiled' | 'woven' | 'done' | 'skipped';
+
+export const PIPELINE_STATUS = {
+  PENDING: 'pending' as const,
+  COMPILED: 'compiled' as const,
+  WOVEN: 'woven' as const,
+  DONE: 'done' as const,
+  SKIPPED: 'skipped' as const,
+} satisfies Record<string, PipelineStatus>;
+
 /** Compile threshold: trigger obs-compile when raw sessions >= this */
 export const COMPILE_THRESHOLD = 5;
 
@@ -73,6 +86,14 @@ export const QUERY_DEFAULT_LIMIT = 3;
 
 /** Days before marking content as stale */
 export const STALE_DAYS = 90;
+
+/** Change log configuration for incremental processing */
+export const CHANGE_LOG = {
+  /** Max entries to keep in change log */
+  MAX_ENTRIES: 1000,
+  /** Full scan interval (hours) */
+  FULL_SCAN_INTERVAL_HOURS: 24,
+} as const;
 
 /** Cross-page analysis thresholds */
 export const ANALYSIS = {
