@@ -1,0 +1,49 @@
+{
+  "phase": "0",
+  "timestamp": "2026-06-11T04:56:00Z",
+  "before": {
+    "totalRawSessions": 113,
+    "compiledTrue": 76,
+    "stuckPending": 37
+  },
+  "phase0_1": {
+    "script": "scripts/cleanup-stuck-sessions.ts",
+    "description": "Added title + compiled:false to 37 sessions without compiled field",
+    "processed": 37,
+    "addedTitle": 37,
+    "markedTrivial": 0
+  },
+  "phase0_2": {
+    "script": "scripts/merge-fork-sessions.ts",
+    "description": "Merged duplicate fork sessions by title grouping",
+    "groupsFound": 7,
+    "forkMerged": 28,
+    "forkMergedBreakdown": {
+      "ERPNext/scout": "20 merged from 21",
+      "pi/skills-hub": "3 merged from 4",
+      "pi/wezterm": "1 merged from 2",
+      "pi/list-pages": "1 merged from 2",
+      "pi/hello": "1 merged from 2",
+      "pi/no-target": "1 merged from 2",
+      "pi/suagents": "1 merged from 2"
+    }
+  },
+  "manualCleanup": {
+    "merged09_21": "pi error fork pair merged",
+    "markedTrivial": ["Hello session", "无明确目标 session"]
+  },
+  "after": {
+    "totalRawSessions": 113,
+    "compiledTrue": 107,
+    "genuinePending": 6,
+    "pending": [
+      "ERPNext: 子代理项目适配",
+      "pi: Wezterm Lua 配置优化",
+      "pi: SkillHub 技能源探索",
+      "pi: 列出可用页面",
+      "pi: pi-web-access 扩展错误调试",
+      "pi: pi-subagents 使用方法"
+    ],
+    "pendingRate": "6/113 = 5.3% (was 33%)"
+  }
+}
