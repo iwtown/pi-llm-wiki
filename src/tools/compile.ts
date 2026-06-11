@@ -189,6 +189,9 @@ export async function compile(
     .sort((a, b) => b.sim - a.sim);
   if (similar.length > 0) {
     const top = similar[0];
+    // Mark as compiled anyway (dedup — content already exists in wiki)
+    await markCompiled(rawPath, { skipped: "duplicate" });
+
     return {
       rawPath,
       wikiPath: top.page.path,
