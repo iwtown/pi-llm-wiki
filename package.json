@@ -25,7 +25,8 @@
   "scripts": {
     "test": "tsx --test tests/unit.test.ts",
     "test:unit": "tsx --test tests/unit.test.ts",
-    "test:all": "tsx --test tests/*.test.ts"
+    "test:pipeline": "LLM_WIKI_TEST_VAULT=/tmp/test-vault-llm-wiki tsx --test tests/pipeline.test.ts tests/changes.test.ts",
+    "test:all": "LLM_WIKI_TEST_VAULT=/tmp/test-vault-llm-wiki tsx --test tests/*.test.ts"
   },
   "devDependencies": {
     "typescript": "^6.0.3",

@@ -129,7 +129,7 @@ export async function lint(
   }
 
   // Skip index pages (豁免)
-  const skipOrphan = [PATHS.index, PATHS.dashboard, PATHS.hot, PATHS.inspection, PATHS.issues];
+  const skipOrphan = [PATHS.index];
 
   for (const fp of wikiFiles) {
     const name = fp.replace("wiki/", "").replace(".md", "");
@@ -140,7 +140,7 @@ export async function lint(
     const incomingByName = incomingCount.get(name) ?? 0;
     const totalIncoming = incoming + incomingByTitle + incomingByName;
 
-    if (totalIncoming === 0 && !skipOrphan.includes(fp) && !fp.startsWith("wiki/索引/")) {
+    if (totalIncoming === 0 && !skipOrphan.includes(fp) && !fp.startsWith("wiki/索引/") && !fp.startsWith("wiki/提示/")) {
       issues.push({
         type: "orphan",
         path: fp,

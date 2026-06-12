@@ -13,6 +13,7 @@ import { writeFile, appendToFile, ping } from "../client";
 import { detectProject } from "../project";
 import { PATHS, INGEST_MAX_CHARS, LLM_WIKI } from "../config";
 import { logChange } from "../system/changes";
+import { dlog } from "../system/log";
 
 const VAULT_BASE = LLM_WIKI.vault;
 
@@ -113,7 +114,7 @@ async function writeWithFallback(
     await writeFile(vaultPath, template);
     return "api";
   } catch (apiErr: any) {
-    console.error(`[pi-llm-wiki] REST API write failed (${apiErr.message}), falling back to filesystem`);
+    dlog(`REST API write failed (${apiErr.message}), falling back to filesystem`);
   }
 
   // Fallback: write directly to vault filesystem
@@ -123,7 +124,7 @@ async function writeWithFallback(
     fs.writeFileSync(fsPath, template, "utf-8");
     return "fs";
   } catch (fsErr: any) {
-    console.error(`[pi-llm-wiki] Filesystem write also failed: ${fsErr.message}`);
+    dlog(`Filesystem write also failed: ${fsErr.message}`);
     return "fail";
   }
 }
@@ -158,7 +159,7 @@ export async function ingest(
   if (parentSessionId) {
     const parentDone = checkParentIngested(parentSessionId, projectName);
     if (parentDone) {
-      console.log(`[pi-llm-wiki] Fork session (parent=${parentSessionId}): skipped (parent already ingested)`);
+      dlog(`Fork session (parent=${parentSessionId}): skipped (parent already ingested)`);
       return { path: "", project: projectName, writeMode: "skip" };
     }
   }
@@ -168,7 +169,7 @@ export async function ingest(
   const topicLine = (contentLines[0] ?? "").replace(/^#+\s*/, "").trim() || "session";
   const score = scoreContent(content);
   if (score.isTrivial) {
-    console.log(`[pi-llm-wiki] Trivial session skipped (score: ${score.score}/100): "${topicLine.slice(0, 60)}"`);
+    dlog(`Trivial session skipped (score: ${score.score}/100): "${topicLine.slice(0, 60)}"`);
     try {
       const logPath = path.join(process.env.HOME ?? "/home", ".pi/agent/pi-llm-wiki-debug.log");
       fs.appendFileSync(logPath, `[trivial-skip] score=${score.score} project=${projectName}\n`);
@@ -197,7 +198,7 @@ export async function ingest(
       for (const f of existing) {
         const fileContent = fs.readFileSync(path.join(rawDir, f), "utf-8");
         if (fileContent.includes(`session_id: "${sessionId}"`)) {
-          console.error(`[pi-llm-wiki] Session ${sessionId} already ingested, skipping`);
+          dlog(`Session ${sessionId} already ingested, skipping`);
           return { path: vaultPath, project: projectName, writeMode: "skip" };
         }
       }

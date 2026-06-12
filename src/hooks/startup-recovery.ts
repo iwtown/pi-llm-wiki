@@ -59,7 +59,7 @@ function parseSession(jsonlPath: string): {
       const trimmed = line.trim();
       if (!trimmed) continue;
 
-      let entry: any;
+      let entry: Record<string, unknown>;
       try {
         entry = JSON.parse(trimmed);
       } catch {
@@ -72,10 +72,11 @@ function parseSession(jsonlPath: string): {
       }
 
       // Extract user messages (old format: type="user", new format: type="message", role="user")
+      const entryAny = entry as Record<string, unknown>;
       if (entry.type === "user") {
-        const text = extractText(entry.message ?? entry);
+        const text = extractText(entryAny.message ?? entry);
         if (text) userMessages.push(text);
-      } else if (entry.type === "message" && entry.message?.role === "user") {
+      } else if (entry.type === "message" && (entryAny.message as Record<string, unknown>)?.role === "user") {
         const text = extractText(entry.message);
         if (text) userMessages.push(text);
       }
@@ -87,19 +88,22 @@ function parseSession(jsonlPath: string): {
   return { hasIngestMarker, userMessages };
 }
 
-function extractText(msg: any): string {
+function extractText(msg: unknown): string {
   if (!msg) return "";
   if (typeof msg === "string") return msg;
-  const content = msg.content ?? msg.text ?? msg.message;
+  const msgObj = msg as Record<string, unknown>;
+  const content = msgObj.content ?? msgObj.text ?? msgObj.message;
   if (typeof content === "string") return content;
   if (Array.isArray(content)) {
     return content
-      .filter((b: any) => b && (b.type === "text" || b.type === "input_text"))
-      .map((b: any) => b.text)
+      .filter((b: unknown): b is { type: string; text: string } =>
+        b !== null && typeof b === "object" && "type" in (b as Record<string, unknown>) && "text" in (b as Record<string, unknown>)
+      )
+      .map((b) => b.text)
       .join(" ");
   }
-  if (content && typeof content === "object" && typeof (content as any).text === "string") {
-    return (content as any).text;
+  if (content && typeof content === "object" && typeof (content as {text: string}).text === "string") {
+    return (content as {text: string}).text;
   }
   return "";
 }

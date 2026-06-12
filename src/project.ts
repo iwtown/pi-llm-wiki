@@ -42,5 +42,13 @@ export function detectProject(cwd: string): ProjectInfo | null {
   }
 
   // Default: use directory name
-  return { name: path.basename(cwd), root: cwd, source: "package.json" };
+  let name = path.basename(cwd);
+  // Clean up path-encoded names from crash recovery (e.g. "_home_wtown_projects_pi_" → "pi")
+  // These occur when cwd is encoded as a file-system-safe path like "_home_wtown_projects_pi_"
+  const parts = name.split("_");
+  const meaningful = parts.filter((p) => p && p.length > 1 && !["home", "mnt", "projects", "modules", "dotfiles", "tmp", "Users"].includes(p));
+  if (meaningful.length > 0 && meaningful.length < parts.length) {
+    name = meaningful[meaningful.length - 1]; // Use the last meaningful segment
+  }
+  return { name, root: cwd, source: "package.json" };
 }

@@ -457,3 +457,161 @@ describe("scoreContent", () => {
     assert.equal(result.factors.hasInsights, true);
   });
 });
+
+/* ───────── compile.ts — parseStructuredBody (extended format) ───────── */
+
+import { parseStructuredBody } from "../src/tools/compile";
+
+describe("parseStructuredBody (extended)", () => {
+  it("parses summary, tags, importance from new format", () => {
+    const body = `## 摘要
+关于 WezTerm 中文输入法的配置总结
+
+### 🎯 目标
+配置 WezTerm 的中文输入
+
+### ⚖️ 决策
+- 启用 use_ime=true
+- 关闭 kitty_keyboard
+
+### 💡 洞察
+- kitty keyboard 与中文输入法冲突
+
+### ⚠️ 遗留
+- 需要测试 Ctrl+Space 切换
+
+### 🏷️ 标签
+- WezTerm, 中文输入, WSL2`;
+    const result = parseStructuredBody(body);
+    assert.ok(result, "should parse successfully");
+    assert.equal(result!.summary, "关于 WezTerm 中文输入法的配置总结");
+    assert.ok(result!.tags!.includes("WezTerm"), "should include WezTerm tag");
+    assert.ok(result!.tags!.includes("中文输入"), "should include Chinese IME tag");
+    assert.equal(result!.goal, "配置 WezTerm 的中文输入");
+    assert.equal(result!.decisions.length, 2);
+    assert.equal(result!.insights.length, 1);
+    assert.equal(result!.issues.length, 1);
+  });
+
+  it("filters out 暂无 placeholder", () => {
+    const body = `## 摘要
+测试暂无过滤
+
+### 🎯 目标
+测试
+
+### ⚖️ 决策
+- 暂无
+
+### 💡 洞察
+- 发现一个问题
+
+### ⚠️ 遗留
+- 暂无
+
+### 🏷️ 标签
+- test`;
+    const result = parseStructuredBody(body);
+    assert.ok(result, "should parse");
+    assert.equal(result!.decisions.length, 0, "暂无 should be filtered");
+    assert.equal(result!.insights.length, 1, "真实洞察应保留");
+    assert.equal(result!.issues.length, 0, "暂无 should be filtered");
+  });
+
+  it("handles old format without summary/tags", () => {
+    const body = `### 🎯 目标
+修复 bug
+
+### ⚖️ 决策
+- 方案 A
+
+### 💡 洞察
+- 根因是缓存`;
+    const result = parseStructuredBody(body);
+    assert.ok(result, "should parse old format");
+    assert.equal(result!.summary, undefined, "no summary in old format");
+    assert.equal(result!.tags, undefined, "no tags in old format");
+    assert.equal(result!.goal, "修复 bug");
+    assert.equal(result!.decisions.length, 1);
+    assert.equal(result!.insights.length, 1);
+  });
+});
+
+/* ───────── compile.ts — callProvider with mock fetch ───────── */
+
+import { callProvider } from "../src/tools/compile";
+
+describe("callProvider (retry logic)", () => {
+  it("retries on 429 then succeeds", async () => {
+    let callCount = 0;
+    const mockFetch = async () => {
+      callCount++;
+      if (callCount === 1) {
+        return { status: 429, headers: new Map(), ok: false } as any;
+      }
+      return {
+        status: 200,
+        ok: true,
+        headers: new Map(),
+        json: async () => ({
+          choices: [{ message: { content: `### 🎯 目标\n测试\n\n### ⚖️ 决策\n- 决定 A` } }],
+        }),
+      } as any;
+    };
+
+    const fastRetry = { maxRetries: 3, retryBaseDelayMs: 1, maxRetryDelayMs: 100, minIntervalMs: 1 };
+
+    const result = await callProvider(
+      "test body",
+      { model: "test-model", endpoint: "https://test.api", timeoutMs: 5000, maxTokens: 100 },
+      "test-key",
+      "test prompt",
+      mockFetch,
+      fastRetry,
+    );
+    assert.ok(result, "should succeed after retry");
+    assert.equal(callCount, 2, "should have called fetch twice");
+    assert.equal(result!.goal, "测试");
+  });
+
+  it("exhausts retries on permanent 429", async () => {
+    let callCount = 0;
+    const mockFetch = async () => {
+      callCount++;
+      return { status: 429, headers: new Map(), ok: false } as any;
+    };
+
+    const fastRetry = { maxRetries: 3, retryBaseDelayMs: 1, maxRetryDelayMs: 100, minIntervalMs: 1 };
+    const result = await callProvider(
+      "test body",
+      { model: "test-model", endpoint: "https://test.api", timeoutMs: 5000, maxTokens: 100 },
+      "test-key",
+      "test prompt",
+      mockFetch,
+      fastRetry,
+    );
+    // maxRetries=3 means 4 total attempts (initial + 3 retries)
+    assert.equal(result, null, "should return null after retry exhaustion");
+    assert.equal(callCount, 4, "should retry 3 times = 4 total calls");
+  });
+
+  it("does not retry on 400 error", async () => {
+    let callCount = 0;
+    const mockFetch = async () => {
+      callCount++;
+      return { status: 400, headers: new Map(), ok: false } as any;
+    };
+
+    const fastRetry = { maxRetries: 3, retryBaseDelayMs: 1, maxRetryDelayMs: 100, minIntervalMs: 1 };
+    const result = await callProvider(
+      "test body",
+      { model: "test-model", endpoint: "https://test.api", timeoutMs: 5000, maxTokens: 100 },
+      "test-key",
+      "test prompt",
+      mockFetch,
+      fastRetry,
+    );
+    assert.equal(result, null, "should return null on 400");
+    assert.equal(callCount, 1, "should NOT retry on 400");
+  });
+});

@@ -8,6 +8,7 @@ import { readFile, ping } from "../client";
 import { PATHS, LLM_WIKI } from "../config";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { dlog } from "../system/log";
 
 /** Retry a promise-returning function with delay */
 async function retry<T>(fn: () => Promise<T>, retries: number, delayMs: number): Promise<T> {
@@ -63,7 +64,7 @@ export async function injectSchema(pi: ExtensionAPI): Promise<void> {
       return { systemPrompt: event.systemPrompt + prefix };
     } catch (e: any) {
       // Schema injection failure is non-fatal — don't block agent
-      console.error(`[pi-llm-wiki] Failed to inject schema: ${e.message}`);
+      dlog(`Failed to inject schema: ${e.message}`);
       try {
         fs.appendFileSync(SLOG_PATH, JSON.stringify({ ts: new Date().toISOString(), event: "schema_inject_fail", error: e.message }) + "\n");
       } catch { /* non-fatal */ }

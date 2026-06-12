@@ -16,8 +16,8 @@ function getApiKey(): string {
 }
 
 export const LLM_WIKI = {
-  /** Obsidian REST API endpoint (obsidian-api plugin, HTTPS, WSL2 mirrored) */
-  api: "https://localhost:27124",
+  /** Obsidian REST API endpoint (obsidian-local-rest-api plugin, HTTP, WSL2 mirrored) */
+  api: "http://localhost:27126",
   /** Bearer token for REST API */
   get key() { return getApiKey(); },
   /** WSL2 filesystem path to vault — overridable via LLM_WIKI_TEST_VAULT for testing */
@@ -36,10 +36,6 @@ export const PATHS = {
   schema: "schema.md",
   log: "log.md",
   index: "wiki/图谱.md",
-  dashboard: "wiki/仪表盘.md",
-  hot: "wiki/hot.md",
-  inspection: "wiki/流程巡检.md",
-  issues: "wiki/问题追踪.md",
   rawSessions: "raw/sessions",
   rawClippings: "raw/clippings",
   rawNotes: "raw/notes",
@@ -62,6 +58,7 @@ export const WIKI_TYPES = [
   "索引",
   "规则",
   "引用",
+  "提示",
 ] as const;
 
 /** Pipeline status enum (Phase 5: replaces compiled/weaved/linted booleans) */
@@ -78,22 +75,46 @@ export const PIPELINE_STATUS = {
 /** Compile threshold: trigger obs-compile when raw sessions >= this */
 export const COMPILE_THRESHOLD = 5;
 
-/** LLM configuration for compile-time extraction */
+/** LLM configuration for compile-time extraction (all env-overridable) */
 export const LLM_CONFIG = {
-  /** GLM model for structured extraction during compile */
-  model: "glm-4-flash-250414",
-  /** Zhipu AI API endpoint */
-  endpoint: "https://open.bigmodel.cn/api/paas/v4/chat/completions",
+  /** Primary model — override via LLM_WIKI_EXTRACT_MODEL */
+  model: process.env.LLM_WIKI_EXTRACT_MODEL || "glm-4-flash-250414",
+  /** Primary API endpoint — override via LLM_WIKI_EXTRACT_ENDPOINT */
+  endpoint: process.env.LLM_WIKI_EXTRACT_ENDPOINT || "https://open.bigmodel.cn/api/paas/v4/chat/completions",
   /** Environment variable name for API key */
   keyVar: "ZHIPU_API_KEY",
-  /** Timeout for LLM calls (ms) */
-  timeoutMs: 15_000,
-  /** Max tokens for LLM output */
-  maxTokens: 1000,
+  /** Timeout for LLM calls (ms) — override via LLM_WIKI_EXTRACT_TIMEOUT_MS */
+  timeoutMs: Number(process.env.LLM_WIKI_EXTRACT_TIMEOUT_MS) || 15_000,
+  /** Max tokens for LLM output — override via LLM_WIKI_EXTRACT_MAX_TOKENS */
+  maxTokens: Number(process.env.LLM_WIKI_EXTRACT_MAX_TOKENS) || 1000,
+  /** Context chars to send to LLM (body slice) — override via LLM_WIKI_EXTRACT_CONTEXT_CHARS */
+  contextChars: Number(process.env.LLM_WIKI_EXTRACT_CONTEXT_CHARS) || 4000,
+  /** Max retry attempts on 429/503 */
+  maxRetries: 3,
+  /** Base delay for exponential backoff (ms) */
+  retryBaseDelayMs: 1000,
+  /** Maximum delay between retries (ms) */
+  maxRetryDelayMs: 10_000,
+  /** Minimum interval between extraction requests (ms) — 15 RPM safe rate */
+  minIntervalMs: 4000,
 } as const;
 
-/** Single session ingest max chars */
-export const INGEST_MAX_CHARS = 500;
+/** Optional fallback LLM provider (e.g. SiliconFlow) — only used when fully configured via env vars */
+export const LLM_FALLBACK_CONFIG = {
+  /** Fallback model — set via LLM_WIKI_FALLBACK_MODEL */
+  model: process.env.LLM_WIKI_FALLBACK_MODEL || "",
+  /** Fallback endpoint — set via LLM_WIKI_FALLBACK_ENDPOINT */
+  endpoint: process.env.LLM_WIKI_FALLBACK_ENDPOINT || "",
+  /** Environment variable name for fallback API key */
+  keyVar: "SILICONFLOW_API_KEY",
+  /** Timeout (ms) — override via LLM_WIKI_FALLBACK_TIMEOUT_MS */
+  timeoutMs: Number(process.env.LLM_WIKI_FALLBACK_TIMEOUT_MS) || 15_000,
+  /** Max tokens — override via LLM_WIKI_FALLBACK_MAX_TOKENS */
+  maxTokens: Number(process.env.LLM_WIKI_FALLBACK_MAX_TOKENS) || 1000,
+} as const;
+
+/** Single session ingest max chars — raised from 500 to 3000 to preserve conversation context for GLM extraction */
+export const INGEST_MAX_CHARS = 3000;
 
 /** obs-query default result limit */
 export const QUERY_DEFAULT_LIMIT = 3;

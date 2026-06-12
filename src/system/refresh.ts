@@ -20,6 +20,7 @@ import { compile as compileSession } from "../tools/compile";
 import { readChangeLog, getCachedFiles, updateCache, needsFullScan, isRelevantPendingPath, logChange } from "./changes";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { scoreContent } from "../tools/ingest";
+import { dlog } from "./log";
 
 const VAULT = LLM_WIKI.vault;
 
@@ -194,7 +195,7 @@ async function autoCompile(): Promise<{ wikiPaths: string[]; rawPaths: string[] 
         appendLog("compile", `${rawPath} → ${result.wikiPath}`);
       }
     } catch (e: any) {
-      console.error(`[pi-llm-wiki] auto-compile error for ${rawPath}: ${e.message}`);
+      dlog(`auto-compile error for ${rawPath}: ${e.message}`);
     }
   }
 
@@ -282,7 +283,7 @@ function autoWeave(newWikiPaths: string[]): number {
         updated++;
       }
     } catch (e: any) {
-      console.error(`[pi-llm-wiki] auto-weave error for ${wikiPath}: ${e.message}`);
+      dlog(`auto-weave error for ${wikiPath}: ${e.message}`);
     }
   }
 
@@ -394,7 +395,7 @@ function autoCompileZinbox(): string[] {
       // Phase 5: Score gate — skip trivial ZInBox content
       const zbScore = scoreContent(body);
       if (zbScore.isTrivial) {
-        console.log(`[pi-llm-wiki] ZInBox skip (trivial, score=${zbScore.score}): ${rel}`);
+        dlog(`ZInBox skip (trivial, score=${zbScore.score}): ${rel}`);
         fs.writeFileSync(
           path.join(indexDir, markerName),
           `---\nsource: "zinbox://${rel}"\ncompiled: true\nskipped: trivial\nscore: ${zbScore.score}\n---\n`,
@@ -404,14 +405,8 @@ function autoCompileZinbox(): string[] {
         continue;
       }
 
-      // Determine wiki type
-      const typeHints: string[] = [];
-      if (/决策|决定|选择|改用|配置/.test(body)) typeHints.push("决策");
-      if (/发现|陷阱|注意|教训|坑/.test(body)) typeHints.push("发现");
-      if (/概念|原理|本质|模型|理论/.test(body)) typeHints.push("概念");
-      if (/步骤|流程|方法|如何|教程|指南/.test(body)) typeHints.push("流程");
-      if (/命令|CLI|命令行|快捷|快捷键/.test(body)) typeHints.push("命令");
-      const wikiDir = typeHints[0] || "发现";
+      // ZInBox pages are external clippings — always route to 引用
+      const wikiDir = "引用";
 
       const fileName = title.replace(/[/\\?%*:"<>]/g, "-").replace(/\s+/g, "-").slice(0, 80) || "untitled";
 
@@ -427,63 +422,18 @@ function autoCompileZinbox(): string[] {
         continue;
       }
 
-      // Create wiki page directly (no template — Phase 2: remove applyTemplate dependency)
-      const wikiContent = `---
-title: "${title.replace(/"/g, '\\"')}"
-tags: [wiki/${wikiDir}, compiled, zinbox]
-type: "${wikiDir}"
-project: "zinbox"
-source: "zinbox://${rel}"
-created: ${now}
-compiled: ${now}
----
-
-# ${title}
-
-${body.slice(0, 3000)}
-`;
-
-      const wikiFullPath = path.join(VAULT, wikiRelPath);
-      fs.mkdirSync(path.dirname(wikiFullPath), { recursive: true });
-      fs.writeFileSync(wikiFullPath, wikiContent, "utf-8");
-      newWikiPaths.push(wikiRelPath);
-
-      // Create marker
+      // Don't copy ZInBox content into wiki — just create a marker for search tracking
+      // ZInBox is searchable via obs-query scope=zinbox (grep on the ZInBox vault directly)
       fs.writeFileSync(
         path.join(indexDir, markerName),
-        `---\nsource: "zinbox://${rel}"\ncompiled: true\nwiki: "${wikiRelPath}"\nscore: ${zbScore.score}\n---\n`,
+        `---\nsource: "zinbox://${rel}"\ncompiled: true\nscore: ${zbScore.score}\n---\n`,
         "utf-8"
       );
       existingIndexes.add(markerName);
       compiled++;
 
       // Phase 5: Log to change log for incremental processing
-      logChange({ type: "compile", path: wikiRelPath, action: "create", timestamp: now });
-
-      // Phase 5: Extract insights from ZInBox content into hub page
-      if (/💡|发现|陷阱|注意|教训|洞察/i.test(body)) {
-        try {
-          const insightLines = body.split("\n")
-            .filter((l) => /💡|发现|陷阱|注意|教训|洞察/i.test(l))
-            .map((l) => l.replace(/^[-*#]\s*/, "").trim())
-            .filter((l) => l.length > 5)
-            .slice(0, 3);
-          if (insightLines.length > 0) {
-            const insightHub = path.join(VAULT, "wiki/索引/zinbox-insights.md");
-            let insightContent = "";
-            try { insightContent = fs.readFileSync(insightHub, "utf-8"); } catch { /* 洞察文件不存在正常 */ }
-            if (!insightContent.includes(`[[${wikiRelPath.replace(/\.md$/, "")}]]`)) {
-              const insightEntry = insightLines.map((l) => `- 💡 ${l} — [[${wikiRelPath.replace(/\.md$/, "")}]]`).join("\n");
-              const newSection = `\n### ${now}\n${insightEntry}\n`;
-              fs.mkdirSync(path.dirname(insightHub), { recursive: true });
-              if (!insightContent.includes("# ZInBox 洞察")) {
-                insightContent = `# ZInBox 洞察\n\n> 自动提取自 ZInBox 剪藏的有价值内容\n`;
-              }
-              fs.writeFileSync(insightHub, insightContent + newSection, "utf-8");
-            }
-          }
-        } catch { /* non-fatal */ }
-      }
+      logChange({ type: "compile", path: `zinbox://${rel}`, action: "update" as const, timestamp: now });
     } catch (e: any) {
       // Skip unreadable files silently
     }
@@ -511,7 +461,7 @@ function runAutoLint(): void {
       appendLog("lint", `✅ 健康 — ${report.total} pages`);
     }
   } catch (e: any) {
-    console.error(`[pi-llm-wiki] auto-lint error: ${e.message}`);
+    dlog(`auto-lint error: ${e.message}`);
   }
 }
 
@@ -527,16 +477,16 @@ export function refreshSystemPages(pi: ExtensionAPI): void {
       // Step 1b: ZInBox auto-compile (external clippings, no copy to raw/)
       const zinboxPages = autoCompileZinbox();
       if (zinboxPages.length > 0) {
-        console.error(`[pi-llm-wiki] ZInBox compile: ${zinboxPages.length} clippings`);
+        dlog(`ZInBox compile: ${zinboxPages.length} clippings`);
         newPages = [...newPages, ...zinboxPages];
       }
 
       if (newPages.length > 0) {
-        console.error(`[pi-llm-wiki] Auto-compiled ${newPages.length} total`);
+        dlog(`Auto-compiled ${newPages.length} total`);
 
         // Step 2: Auto-weave backlinks
         const woven = autoWeave(newPages);
-        console.error(`[pi-llm-wiki] Auto-weave: ${woven} backlinks`);
+        dlog(`Auto-weave: ${woven} backlinks`);
 
         // Phase 5: Advance pipeline state — mark all compiled sessions as woven + linted
         // since the full auto-pipeline (compile → weave → lint → status) ran in one pass
@@ -547,7 +497,7 @@ export function refreshSystemPages(pi: ExtensionAPI): void {
           } catch { /* non-fatal */ }
         }
         if (rawPaths.length > 0) {
-          console.error(`[pi-llm-wiki] Pipeline: ${rawPaths.length} sessions advanced to done`);
+          dlog(`Pipeline: ${rawPaths.length} sessions advanced to done`);
         }
       }
 
@@ -556,9 +506,9 @@ export function refreshSystemPages(pi: ExtensionAPI): void {
 
       // Step 4: Regenerate status page
       writeSystemPage("wiki/状态.md", generateStatus());
-      console.error("[pi-llm-wiki] Status page refreshed");
+      dlog("Status page refreshed");
     } catch (e: any) {
-      console.error(`[pi-llm-wiki] Hook error: ${e.message}`);
+      dlog(`Hook error: ${e.message}`);
     }
   });
 }

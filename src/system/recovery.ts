@@ -12,7 +12,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { readFile, writeFile } from "../client";
 import { markWeaved, markLinted, getStuckSessions } from "../manifest";
 import { PATHS } from "../config";
-import { dlog } from "../system/log";
+import { dlog } from "./log";
 
 export interface RecoveryResult {
   recovered: number;
@@ -223,13 +223,11 @@ export function registerPipelineRecovery(pi: ExtensionAPI): void {
     try {
       const result = await recoverPipeline(ctx);
       if (result.recovered > 0 || result.errors.length > 0) {
-        console.error(
-          `[pi-llm-wiki] Pipeline recovery: ${result.recovered} recovered, ${result.errors.length} errors`
-        );
-        result.errors.forEach((e) => console.error(`  [pi-llm-wiki]   ↳ ${e}`));
+        dlog(`Pipeline recovery: ${result.recovered} recovered, ${result.errors.length} errors`);
+        result.errors.forEach((e) => dlog(`  ↳ ${e}`));
       }
     } catch (e: any) {
-      console.error(`[pi-llm-wiki] Pipeline recovery failed: ${e.message}`);
+      dlog(`Pipeline recovery failed: ${e.message}`);
     }
   });
 }

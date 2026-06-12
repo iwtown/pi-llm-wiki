@@ -108,7 +108,7 @@ export async function getStuckSessions(): Promise<
           const isCompiled = (fm.compiled === true || fm.compiled === "true")
             || status === "compiled" || status === "woven" || status === "done";
           if (isCompiled) {
-            const isDone = status === "done" || status === "skipped"
+            const isDone = status === "done" || status === "skipped" || status === "woven"
               || (fm.weaved === true || fm.weaved === "true")
               && (fm.linted === true || fm.linted === "true");
             if (!isDone) {

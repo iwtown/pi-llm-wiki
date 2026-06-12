@@ -18,20 +18,16 @@ const WIKI_DIR = path.join(TEST_VAULT, "wiki");
 process.env.LLM_WIKI_TEST_VAULT = TEST_VAULT;
 // Rest API calls will fail in test — that's fine, ingest falls back to fs
 
-import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { ingest } from "../src/tools/ingest";
-
-// Create a minimal ExtensionContext for testing
-function makeCtx(overrides?: Record<string, unknown>): ExtensionContext {
+// Create a minimal ExtendedContext for testing
+function makeCtx(sessionId = "test-session-001"): Record<string, unknown> {
   return {
     cwd: process.cwd(),
     sessionManager: {
-      sessionId: "test-session-001",
+      sessionId,
       getBranch: () => [],
-      getSessionId: () => "test-session-001",
-    } as any,
-    ...overrides,
-  } as any;
+      getSessionId: () => sessionId,
+    },
+  };
 }
 
 describe("pipeline: ingest", () => {
@@ -46,7 +42,8 @@ describe("pipeline: ingest", () => {
   });
 
   it("ingest creates raw session with correct frontmatter", async () => {
-    const ctx = makeCtx({ sessionManager: { sessionId: "ingest-test-001", getBranch: () => [], getSessionId: () => "ingest-test-001" } } as any);
+    const { ingest } = await import("../src/tools/ingest");
+    const ctx = makeCtx("ingest-test-001");
     const result = await ingest(
       [
         "## 会话复盘 — 2026-06-11",
@@ -89,7 +86,8 @@ describe("pipeline: ingest", () => {
   });
 
   it("ingest marks session with session_score for structured content", async () => {
-    const ctx = makeCtx({ sessionManager: { sessionId: "score-test-002", getBranch: () => [], getSessionId: () => "score-test-002" } } as any);
+    const { ingest } = await import("../src/tools/ingest");
+    const ctx = makeCtx("score-test-002");
     const content = [
       "## 会话复盘",
       "",
@@ -124,9 +122,19 @@ describe("pipeline: ingest + compile", () => {
     fs.rmSync(TEST_VAULT, { recursive: true, force: true });
   });
 
+  it("ingest skips trivial session (score < 30)", async () => {
+    const { ingest } = await import("../src/tools/ingest");
+    const ctx = makeCtx("trivial-test-001");
+    // Short content with no structure → score < 30 → trivial
+    const content = "## 测试\n\nhello world";
+    const result = await ingest(content, ctx);
+    assert.equal(result.writeMode, "skip", "trivial content should be skipped");
+  });
+
   it("ingest dedup by session_id", async () => {
+    const { ingest } = await import("../src/tools/ingest");
     const uniqueId = "dup-test-" + Date.now();
-    const ctx = makeCtx({ sessionManager: { sessionId: uniqueId, getBranch: () => [], getSessionId: () => uniqueId } } as any);
+    const ctx = makeCtx(uniqueId);
 
     // First ingest — content must be high-scoring to not be skipped
     const content = [
@@ -257,5 +265,72 @@ Similar content
 
     assert.ok(result, "compile should return result");
     assert.ok(result.dedupSuggestion, "should return dedup suggestion when topic exists");
+  });
+});
+
+describe("pipeline: weave", () => {
+  before(() => {
+    fs.rmSync(TEST_VAULT, { recursive: true, force: true });
+    fs.mkdirSync(SESSIONS_DIR, { recursive: true });
+    fs.mkdirSync(path.join(WIKI_DIR, "发现"), { recursive: true });
+  });
+
+  after(() => {
+    fs.rmSync(TEST_VAULT, { recursive: true, force: true });
+  });
+
+  it("weave appends 经验日志 to linked pages", async () => {
+    // Create a target wiki page
+    const targetPath = "wiki/发现/target-page.md";
+    fs.writeFileSync(path.join(TEST_VAULT, targetPath), `---
+title: "Target Page"
+tags: [wiki/发现]
+---
+
+# Target Page
+
+Some content
+`, "utf-8");
+
+    // Create the new wiki page (needed for backlink updates)
+    const newWikiPath = "wiki/发现/new-page.md";
+    fs.writeFileSync(path.join(TEST_VAULT, newWikiPath), `---
+title: "New Page"
+tags: [wiki/发现]
+---
+
+# New Page
+
+Content
+`, "utf-8");
+
+    // Create a raw session file (needed for markWeaved)
+    const rawPath = "raw/sessions/test-project/test-session.md";
+    fs.mkdirSync(path.dirname(path.join(TEST_VAULT, rawPath)), { recursive: true });
+    fs.writeFileSync(path.join(TEST_VAULT, rawPath), `---
+title: "Test Session"
+session_id: "weave-test-001"
+compiled: false
+tags: [session]
+---
+
+Content
+`, "utf-8");
+
+    const { weave } = await import("../src/tools/weave");
+    const result = await weave(
+      rawPath,
+      newWikiPath,
+      [targetPath],
+      ["Test insight from weave"],
+      { cwd: process.cwd() } as any
+    );
+
+    assert.ok(result, "weave should return result");
+    assert.ok(result.updatedPages.includes(targetPath), "target page should be in updatedPages");
+
+    // Verify target page has 经验日志 appended
+    const targetContent = fs.readFileSync(path.join(TEST_VAULT, targetPath), "utf-8");
+    assert.ok(targetContent.includes("📋 经验日志"), "target page should have 经验日志 section");
   });
 });

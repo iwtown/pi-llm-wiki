@@ -105,7 +105,7 @@ export function generateStatus(): string {
 
   // ── Find orphans (pages with no inbound [[wikilinks]]) ──
   const skipOrphan = new Set([
-    "wiki/图谱.md", "wiki/仪表盘.md", "wiki/流程巡检.md", "wiki/问题追踪.md", "wiki/hot.md", PATHS.index, PATHS.dashboard, PATHS.hot, PATHS.inspection, PATHS.issues
+    "wiki/图谱.md", PATHS.index
   ]);
   const incomingCount = new Map<string, number>();
   const wikiTitles = new Map<string, string>();
@@ -117,7 +117,7 @@ export function generateStatus(): string {
   }
   const orphans: string[] = [];
   for (const wf of wikiFiles) {
-    if (skipOrphan.has(wf.relPath) || wf.fm.kind === "system" || wf.relPath.startsWith("wiki/索引/")) continue;
+    if (skipOrphan.has(wf.relPath) || wf.fm.kind === "system" || wf.relPath.startsWith("wiki/索引/") || wf.relPath.startsWith("wiki/提示/")) continue;
     // Skip ZInBox clippings — they're external, intentionally orphan
     const tags = String(wf.fm.tags ?? "");
     if (tags.includes("zinbox")) continue;
@@ -240,7 +240,7 @@ export function autoLint(): { errors: number; warnings: number; stale: number; o
   const cutoffStr = staleCutoff.toISOString().split("T")[0];
 
   const skipOrphan = new Set([
-    "wiki/图谱.md", "wiki/仪表盘.md", "wiki/流程巡检.md", "wiki/问题追踪.md", "wiki/hot.md", PATHS.index, PATHS.dashboard, PATHS.hot, PATHS.inspection, PATHS.issues
+    "wiki/图谱.md", PATHS.index
   ]);
 
   // Orphan count
@@ -254,7 +254,7 @@ export function autoLint(): { errors: number; warnings: number; stale: number; o
   }
   let orphans = 0;
   for (const wf of wikiFiles) {
-    if (skipOrphan.has(wf.relPath) || wf.fm.kind === "system" || wf.relPath.startsWith("wiki/索引/")) continue;
+    if (skipOrphan.has(wf.relPath) || wf.fm.kind === "system" || wf.relPath.startsWith("wiki/索引/") || wf.relPath.startsWith("wiki/提示/")) continue;
     // Skip ZInBox tagged pages (external clippings, intentionally orphan)
     const tags = String(wf.fm.tags ?? "");
     if (tags.includes("zinbox")) continue;

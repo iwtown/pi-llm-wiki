@@ -24,15 +24,16 @@ import { capture } from "./tools/capture";
 import { reference } from "./tools/reference";
 import { aggregate } from "./tools/aggregate";
 import { distill } from "./tools/distill";
+import { dlog } from "./system/log";
 
 export default function (pi: ExtensionAPI) {
   // ─── Hooks ───────────────────────────────────────────────
 
   injectSchema(pi).catch((e) =>
-    console.error("[pi-llm-wiki] before-start hook failed:", e)
+    dlog(`before-start hook failed: ${e}`)
   );
   autoIngest(pi).catch((e) =>
-    console.error("[pi-llm-wiki] agent-end hook failed:", e)
+    dlog(`agent-end hook failed: ${e}`)
   );
   registerStartupRecovery(pi);
   refreshSystemPages(pi);
@@ -51,7 +52,7 @@ export default function (pi: ExtensionAPI) {
     parameters: Type.Object({
       query: Type.String({ description: "Search query." }),
       scope: Type.Optional(
-        Type.String({ description: "Scope: 'all', 'wiki', 'raw', 'zinbox', or vault name." })
+        Type.String({ description: "Scope: 'all', 'wiki', 'raw', 'zinbox', 'prompt', or vault name. 'prompt' only searches wiki/提示/." })
       ),
       limit: Type.Optional(
         Type.Number({ description: "Max results (default: 3)." })

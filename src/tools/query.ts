@@ -272,7 +272,9 @@ export async function query(
   // C1: Filter search results by scope
   const scopedSearch = searchResults.filter((r) => {
     if (scope === "all") return true;
-    return r.path.startsWith(scope === "wiki" ? "wiki/" : "raw/");
+    if (scope === "wiki") return r.path.startsWith("wiki/");
+    if (scope === "prompt") return r.path.startsWith("wiki/提示/");
+    return r.path.startsWith("raw/");
   });
 
   // Merge: atlas results first (higher trust), then search, deduplicate by path
