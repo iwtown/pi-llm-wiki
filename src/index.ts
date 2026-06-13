@@ -52,7 +52,7 @@ export default function (pi: ExtensionAPI) {
     parameters: Type.Object({
       query: Type.String({ description: "Search query." }),
       scope: Type.Optional(
-        Type.String({ description: "Scope: 'all', 'wiki', 'raw', 'zinbox', 'prompt', or vault name. 'prompt' only searches wiki/提示/." })
+        Type.String({ description: "Scope: 'all', 'wiki', 'raw', 'zinbox', 'prompt', 'gene', or vault name. 'prompt' only searches wiki/提示/. 'gene' only searches wiki/基因/." })
       ),
       limit: Type.Optional(
         Type.Number({ description: "Max results (default: 3)." })

@@ -274,6 +274,7 @@ export async function query(
     if (scope === "all") return true;
     if (scope === "wiki") return r.path.startsWith("wiki/");
     if (scope === "prompt") return r.path.startsWith("wiki/提示/");
+    if (scope === "gene") return r.path.startsWith("wiki/基因/");
     return r.path.startsWith("raw/");
   });
 
