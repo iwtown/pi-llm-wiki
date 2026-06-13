@@ -18,10 +18,31 @@ export function detectProject(cwd: string): ProjectInfo | null {
   const home = process.env.HOME || "/home";
 
   while (dir !== "/" && dir.startsWith(home)) {
-    // Check AGENTS.md first (Pi-specific) — extract project name from title
+    // Check AGENTS.md first (Pi-specific)
     const agentsPath = path.join(dir, "AGENTS.md");
     if (fs.existsSync(agentsPath)) {
       const content = fs.readFileSync(agentsPath, "utf-8");
+
+      // Priority 1: explicit `project:` override line anywhere in AGENTS.md
+      // e.g. "project: pi" — unambiguous project identity independent of title formatting
+      const projectOverride = content.match(/^project:\s*(\S.+)$/m);
+      if (projectOverride) {
+        const name = projectOverride[1].trim().replace(/^["']|["']$/g, "");
+        return { name, root: dir, source: "AGENTS.md" };
+      }
+
+      // Priority 2: YAML frontmatter `project:` field
+      const fmMatch = content.match(/^---\n([\s\S]*?)\n---/);
+      if (fmMatch) {
+        const fmProject = fmMatch[1].split("\n")
+          .find((l: string) => l.trim().startsWith("project:"));
+        if (fmProject) {
+          const name = fmProject.split(":")[1]?.trim().replace(/^["']|["']$/g, "") ?? path.basename(dir);
+          return { name, root: dir, source: "AGENTS.md" };
+        }
+      }
+
+      // Priority 3: extract from markdown title (e.g. "# Pi Agent" → "Pi-Agent")
       const titleMatch = content.match(/^#\s+(.+)$/m);
       const name = titleMatch?.[1]?.replace(/\s+/g, "-") ?? path.basename(dir);
       return { name, root: dir, source: "AGENTS.md" };

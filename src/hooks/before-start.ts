@@ -5,7 +5,7 @@
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { readFile, ping } from "../client";
-import { PATHS, LLM_WIKI } from "../config";
+import { PATHS, LLM_WIKI, COMPILE_THRESHOLD } from "../config";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { dlog } from "../system/log";
@@ -70,5 +70,62 @@ export async function injectSchema(pi: ExtensionAPI): Promise<void> {
       } catch { /* non-fatal */ }
       return undefined; // allow agent to proceed without schema
     }
+  });
+}
+
+// ─── Auto-pipeline check (fire-and-forget, non-blocking) ───
+
+function countPendingRaw(): number {
+  const rawDir = path.join(LLM_WIKI.vault, PATHS.rawSessions);
+  let count = 0;
+  try {
+    const projects = fs.readdirSync(rawDir);
+    for (const proj of projects) {
+      const projDir = path.join(rawDir, proj);
+      if (!fs.statSync(projDir).isDirectory()) continue;
+      const files = fs.readdirSync(projDir).filter((f) => f.endsWith(".md"));
+      for (const file of files) {
+        const content = fs.readFileSync(path.join(projDir, file), "utf-8");
+        const fm = content.match(/^---\n([\s\S]*?)\n---/);
+        if (!fm) continue;
+        const compiled = fm[1].match(/compiled:\s*(true|\d)/);
+        if (compiled) continue; // already compiled
+        const scoreMatch = fm[1].match(/session_score:\s*(\d+)/);
+        const score = scoreMatch ? parseInt(scoreMatch[1], 10) : 0;
+        if (score > 0 && score < 50) continue; // low quality
+        count++;
+      }
+    }
+  } catch { /* non-fatal */ }
+  return count;
+}
+
+/** Lightweight auto-pipeline check — warns when backlog grows past threshold */
+function checkPipelineHealth(): void {
+  try {
+    const pending = countPendingRaw();
+    if (pending >= COMPILE_THRESHOLD) {
+      dlog(`⚠️ Pipeline backlog: ${pending} sessions pending compilation (threshold: ${COMPILE_THRESHOLD})`);
+      try {
+        const slogPath = path.join(process.env.HOME ?? "/home", ".pi/agent/pi-llm-wiki.log");
+        fs.appendFileSync(slogPath, JSON.stringify({
+          ts: new Date().toISOString(),
+          event: "pipeline_backlog",
+          pending,
+          threshold: COMPILE_THRESHOLD,
+        }) + "\n");
+      } catch { /* non-fatal */ }
+    }
+    if (pending > 10) {
+      dlog(`🔴 Large pipeline backlog (${pending} pending). Run: cd ~/projects/pi-llm-wiki && npm run pipeline`);
+    }
+  } catch { /* non-fatal */ }
+}
+
+// Inject pipeline health check into the before_agent_start handler
+// Fire-and-forget: doesn't block session startup
+export async function injectPipelineCheck(pi: ExtensionAPI): Promise<void> {
+  pi.on("before_agent_start", async () => {
+    setTimeout(() => checkPipelineHealth(), 500);
   });
 }

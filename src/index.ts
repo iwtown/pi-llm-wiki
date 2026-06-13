@@ -15,7 +15,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 
-import { injectSchema } from "./hooks/before-start";
+import { injectSchema, injectPipelineCheck } from "./hooks/before-start";
 import { autoIngest } from "./hooks/agent-end";
 import { registerStartupRecovery } from "./hooks/startup-recovery";
 import { refreshSystemPages } from "./system/refresh";
@@ -31,6 +31,9 @@ export default function (pi: ExtensionAPI) {
 
   injectSchema(pi).catch((e) =>
     dlog(`before-start hook failed: ${e}`)
+  );
+  injectPipelineCheck(pi).catch((e) =>
+    dlog(`pipeline-check hook failed: ${e}`)
   );
   autoIngest(pi).catch((e) =>
     dlog(`agent-end hook failed: ${e}`)
