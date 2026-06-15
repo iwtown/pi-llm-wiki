@@ -4,26 +4,9 @@
 
 import * as path from "node:path";
 
-function getApiKey(): string {
-  const key = process.env.OBSIDIAN_LLM_WIKI_KEY ?? process.env.OBSIDIAN_LLM_WIKI_SMART_KEY;
-  if (!key) {
-    throw new Error(
-      "[pi-llm-wiki] OBSIDIAN_LLM_WIKI_KEY or OBSIDIAN_LLM_WIKI_SMART_KEY environment variable is required. " +
-      "Get your key from Obsidian REST API plugin settings."
-    );
-  }
-  return key;
-}
-
 export const LLM_WIKI = {
-  /** Obsidian REST API endpoint (obsidian-local-rest-api plugin, HTTP, WSL2 mirrored) */
-  api: "http://localhost:27126",
-  /** Bearer token for REST API */
-  get key() { return getApiKey(); },
-  /** WSL2 filesystem path to vault — overridable via LLM_WIKI_TEST_VAULT for testing */
+  /* WSL2 filesystem path to vault — overridable via LLM_WIKI_TEST_VAULT for testing */
   vault: process.env.LLM_WIKI_TEST_VAULT || "/mnt/d/DB/Obsidian/LLM-Wiki",
-  /** Windows path (for Obsidian CLI / URI) */
-  vaultWindows: "D:\\DB\\Obsidian\\LLM-Wiki",
   /** External clipping vault (ZInBox) — search-only, no copy */
   zinbox: process.env.LLM_WIKI_TEST_ZINBOX || "/mnt/d/DB/Obsidian/ZInBox",
   /** ZInBox compile tracker (small marker files, no content copy) */
