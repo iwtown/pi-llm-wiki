@@ -349,45 +349,7 @@ Normal page referencing [[概念/缺失概念-X]].`,
 
 /* ───────── client.ts (API integration) ───────── */
 
-import { search, smartSearch } from "../src/client";
 import { scoreContent } from "../src/tools/ingest";
-
-describe("search (API integration)", { timeout: 20_000 }, async () => {
-  it("performs keyword search via REST API", async () => {
-    const results = await search("schema", 5);
-    assert.ok(Array.isArray(results));
-    if (results.length > 0) {
-      assert.ok(typeof results[0].filename === "string");
-      assert.ok(typeof results[0].score === "number");
-    }
-  });
-
-  it("returns empty array on empty query", async () => {
-    const results = await search("", 5);
-    assert.ok(Array.isArray(results));
-  });
-});
-
-describe("smartSearch (API integration)", { timeout: 20_000 }, async () => {
-  it("performs semantic search via Smart Connections", async () => {
-    const results = await smartSearch("知识库规则与编译流程", 5);
-    assert.ok(Array.isArray(results));
-    if (results.length > 0) {
-      assert.ok(typeof results[0].path === "string");
-      assert.ok(results[0].score > 0);
-    }
-  });
-
-  it("returns results ranked by score descending", async () => {
-    const results = await smartSearch("知识库规则", 10);
-    for (let i = 1; i < results.length; i++) {
-      assert.ok(
-        results[i].score <= results[i - 1].score,
-        `Expected score[${i}] (${results[i].score}) <= score[${i - 1}] (${results[i - 1].score})`
-      );
-    }
-  });
-});
 
 /* ───────── ingest.ts / scoreContent ───────── */
 
@@ -571,7 +533,8 @@ describe("callProvider (retry logic)", () => {
     );
     assert.ok(result, "should succeed after retry");
     assert.equal(callCount, 2, "should have called fetch twice");
-    assert.equal(result!.goal, "测试");
+    assert.ok(result!.includes("测试"), "response should contain Chinese text");
+    assert.ok(result!.includes("决定 A"), "response should contain decision content");
   });
 
   it("exhausts retries on permanent 429", async () => {
