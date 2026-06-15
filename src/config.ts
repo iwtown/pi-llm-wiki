@@ -78,7 +78,7 @@ export const PIPELINE_STATUS = {
 } satisfies Record<string, PipelineStatus>;
 
 /** Compile threshold: warn when raw sessions pending >= this (raised from 5 to reduce noise) */
-export const COMPILE_THRESHOLD = 15;
+export const COMPILE_THRESHOLD = 5;
 
 /** LLM configuration for compile-time extraction (all env-overridable) */
 export const LLM_CONFIG = {

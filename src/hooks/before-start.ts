@@ -12,6 +12,7 @@ import * as path from "node:path";
 import { dlog, slog } from "../system/log";
 import { buildIngestedIndex } from "../tools/ingest";
 import { detectProject } from "../project";
+import { parseFrontmatter } from "../system/parse";
 
 /** Retry a promise-returning function with delay */
 async function retry<T>(fn: () => Promise<T>, retries: number, delayMs: number): Promise<T> {
@@ -118,8 +119,9 @@ function readProjectIndex(): Record<string, { path: string; title: string; quali
 }
 
 /**
- * Build a one-line knowledge preview for the current project.
- * Reads the project index (built by pipeline) — O(1), no file scan.
+ * Build a knowledge preview that injects CONTENT (not just links).
+ * Top-1 page gets title + summary + insight count; pages 2-3 show as links.
+ * Uses project index (O(1)) + reads only 1 file for the summary.
  */
 function buildKnowledgePreview(cwd: string): string {
   const project = detectProject(cwd);
@@ -132,10 +134,35 @@ function buildKnowledgePreview(cwd: string): string {
   const matched = projects[projectName];
   if (!matched || matched.length === 0) return "";
 
-  // Take top 3 (already sorted by quality_score descending)
-  const top3 = matched.slice(0, 3);
-  const links = top3.map((p) => `[[${p.path}]]`).join(" · ");
-  return `\n📚 当前相关: ${links}\n\n---\n`;
+  const vaultDir = LLM_WIKI.vault;
+  const top = matched.slice(0, 3);
+
+  // Build rich entry for top-1: read its content inline
+  let topLine = "";
+  try {
+    const fullPath = path.join(vaultDir, top[0].path);
+    const content = fs.readFileSync(fullPath, "utf-8");
+    const fm = parseFrontmatter(content);
+    const summary = typeof fm.summary === "string" ? fm.summary : "";
+
+    // Count decisions + insights from body
+    const body = content.replace(/^---[\s\S]*?---\n*/, "");
+    const dc = (body.match(/^- /gm) || []).length;
+
+    let text = top[0].title;
+    if (summary) text += ` — ${summary.slice(0, 100)}`;
+    if (dc > 0) text += ` (${dc}条知识)`;
+    topLine = `• ${text}\n`;
+  } catch {
+    // Fallback: show as plain link
+    topLine = `• [[${top[0].path}]]\n`;
+  }
+
+  // Pages 2-3 as compact links
+  const restLinks = top.slice(1).map((p) => `[[${p.path}]]`).join(" · ");
+  const restLine = restLinks ? `${restLinks}\n` : "";
+
+  return `\n📚 当前相关:\n${topLine}${restLine}\n---\n`;
 }
 
 // ─── Auto-pipeline check (fire-and-forget, non-blocking) ───
