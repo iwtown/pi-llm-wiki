@@ -33,10 +33,8 @@ export const LLM_WIKI = {
 const HOME = process.env.HOME ?? "/home";
 
 export const PATHS = {
-  /** Distilled runtime schema — injected into system prompt at session start (~500 tokens) */
+  /** Runtime rules — injected into system prompt at session start (~800 tokens) */
   schema: "schema.md",
-  /** Full constitution — kept at wiki/宪法.md for reference reads */
-  constitution: "wiki/宪法.md",
   log: "log.md",
   index: "wiki/图谱.md",
   rawSessions: "raw/sessions",

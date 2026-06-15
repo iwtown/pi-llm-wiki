@@ -56,8 +56,7 @@ export default function (pi: ExtensionAPI) {
       "just read the Dataview index (wiki/索引/某类.md) to list pages, then read the target directly. " +
       "Faster, no API call. Use obs_query only for fuzzy or cross-category search.\n\n" +
       "写作规则：每个新页面需 ≥2 条 [[wikilinks]]；写入前先搜索避免重复；" +
-      "禁止创建孤立节点；用中文标题；不硬编码密钥。" +
-      "完整宪法见 wiki/宪法.md。",
+      "禁止创建孤立节点；用中文标题；不硬编码密钥。",
     parameters: Type.Object({
       query: Type.String({ description: "Search query." }),
       scope: Type.Optional(
@@ -101,7 +100,7 @@ export default function (pi: ExtensionAPI) {
       "capture (save insight), reference (cross-vault ref), aggregate (quarterly summary), distill (compress logs). " +
       "Keywords: 记下来, capture, 跨库, aggregate, 聚合, distill, 蒸馏.\n\n" +
       "保存规则：用中文标题；tags 首个为 wiki/类型 (概念/决策/发现/命令/流程/规则/提示)；" +
-      "写入前先搜索避免重复。完整宪法见 wiki/宪法.md。",
+      "写入前先搜索避免重复。",
     parameters: Type.Object({
       action: Type.String({ description: "One of: capture, reference, aggregate, distill." }),
       // capture params

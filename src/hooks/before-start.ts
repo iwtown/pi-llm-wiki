@@ -1,7 +1,6 @@
 /**
  * pi-llm-wiki — before_agent_start hook.
- * Injects distilled schema (schema.md, ~500 tokens) into the system prompt.
- * Full constitution lives at wiki/宪法.md for reference reads.
+ * Injects runtime schema (schema.md, ~800 tokens) into the system prompt.
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
