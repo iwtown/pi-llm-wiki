@@ -26,8 +26,33 @@ export async function weave(
   const updatedPages: string[] = [];
   const errors: string[] = [];
 
-  // Update each linked page with a backlink and log entry
-  for (const targetPath of linkedTo) {
+  // Read the new wiki page content to discover compile-time wikilinks
+  let wikiContent: string;
+  try {
+    wikiContent = await readFile(wikiPath);
+  } catch {
+    wikiContent = "";
+  }
+
+  // Extract all wikilinks from the wiki content that were added at compile time
+  // (handles both auto-linked `\`\`related\`\`` and manual [[wikilinks]] in body)
+  const contentWikilinks: string[] = [];
+  if (wikiContent) {
+    const wikiLinkRegex = /\[\[([^\]]+)\]\]/g;
+    let m: RegExpExecArray | null;
+    while ((m = wikiLinkRegex.exec(wikiContent)) !== null) {
+      const target = m[1].trim();
+      if (target.startsWith("wiki/") && target !== wikiPath && !target.startsWith("raw/")) {
+        contentWikilinks.push(target);
+      }
+    }
+  }
+
+  // Merge linkedTo (params-based) with content-discovered wikilinks, dedup
+  const allTargets = [...new Set([...linkedTo, ...contentWikilinks])];
+
+  // Reciprocate: for each target page, add backlink + log entry
+  for (const targetPath of allTargets) {
     try {
       const content = await readFile(targetPath);
       let updated = content;
@@ -37,7 +62,7 @@ export async function weave(
         updated += "\n\n## 📋 经验日志\n\n";
       }
 
-      // Append log entry
+      // Append log entry (skip if already present)
       const date = new Date().toISOString().split("T")[0];
       const logEntry = `- [${date}] 关联 [[${wikiPath}]] — 编译自 [[${rawPath}]]`;
       if (!content.includes(`[[${wikiPath}]]`)) {
@@ -62,14 +87,13 @@ export async function weave(
     }
   }
 
-  // Update the new wiki page with backlinks to linkedTo pages
+  // Update the new wiki page with backlinks to allTargets (if links section missing)
   try {
-    let wikiContent = await readFile(wikiPath);
-    const backlinks = linkedTo.map((p) => `\n- [[${p}]]`).join("");
-    if (!wikiContent.includes("## 🔗 相关链接")) {
+    if (wikiContent && !wikiContent.includes("## 🔗 相关链接")) {
+      const backlinks = allTargets.map((p) => `\n- [[${p}]]`).join("");
       wikiContent += `\n\n## 🔗 相关链接\n${backlinks}\n`;
+      await writeFile(wikiPath, wikiContent);
     }
-    await writeFile(wikiPath, wikiContent);
   } catch (e: any) {
     errors.push(`${wikiPath} (backlinks): ${e.message}`);
   }

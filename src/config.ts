@@ -33,7 +33,10 @@ export const LLM_WIKI = {
 const HOME = process.env.HOME ?? "/home";
 
 export const PATHS = {
+  /** Distilled runtime schema — injected into system prompt at session start (~500 tokens) */
   schema: "schema.md",
+  /** Full constitution — kept at wiki/宪法.md for reference reads */
+  constitution: "wiki/宪法.md",
   log: "log.md",
   index: "wiki/图谱.md",
   rawSessions: "raw/sessions",
@@ -45,6 +48,8 @@ export const PATHS = {
   structured: path.join(HOME, ".pi/agent/pi-llm-wiki.log"),
   /** Change log for incremental processing (Phase 3) */
   changes: path.join(HOME, ".pi/agent/pi-llm-wiki-changes.json"),
+  /** Lightweight project index — built by pipeline, read at session start */
+  projectIndex: "wiki/索引/项目索引.json",
 };
 
 export const WIKI_TYPES = [
@@ -72,8 +77,8 @@ export const PIPELINE_STATUS = {
   SKIPPED: 'skipped' as const,
 } satisfies Record<string, PipelineStatus>;
 
-/** Compile threshold: trigger obs-compile when raw sessions >= this */
-export const COMPILE_THRESHOLD = 5;
+/** Compile threshold: warn when raw sessions pending >= this (raised from 5 to reduce noise) */
+export const COMPILE_THRESHOLD = 15;
 
 /** LLM configuration for compile-time extraction (all env-overridable) */
 export const LLM_CONFIG = {
@@ -89,6 +94,12 @@ export const LLM_CONFIG = {
   maxTokens: Number(process.env.LLM_WIKI_EXTRACT_MAX_TOKENS) || 1000,
   /** Context chars to send to LLM (body slice) — override via LLM_WIKI_EXTRACT_CONTEXT_CHARS */
   contextChars: Number(process.env.LLM_WIKI_EXTRACT_CONTEXT_CHARS) || 4000,
+  /** Temperature for extraction calls — override via LLM_WIKI_EXTRACT_TEMPERATURE */
+  temperature: Number(process.env.LLM_WIKI_EXTRACT_TEMPERATURE) || 0.1,
+  /** Temperature for distillation calls (higher for creative title/summary) — override via LLM_WIKI_DISTILL_TEMPERATURE */
+  distillTemperature: Number(process.env.LLM_WIKI_DISTILL_TEMPERATURE) || 0.3,
+  /** Max concurrent LLM API calls (for batch compile/ingest) — override via LLM_WIKI_MAX_CONCURRENCY */
+  maxConcurrency: Number(process.env.LLM_WIKI_MAX_CONCURRENCY) || 3,
   /** Max retry attempts on 429/503 */
   maxRetries: 3,
   /** Base delay for exponential backoff (ms) */
@@ -99,14 +110,14 @@ export const LLM_CONFIG = {
   minIntervalMs: 4000,
 } as const;
 
-/** Optional fallback LLM provider (e.g. SiliconFlow) — only used when fully configured via env vars */
+/** Optional fallback LLM provider (e.g. DeepSeek official API) — used when primary is congested/fails */
 export const LLM_FALLBACK_CONFIG = {
   /** Fallback model — set via LLM_WIKI_FALLBACK_MODEL */
-  model: process.env.LLM_WIKI_FALLBACK_MODEL || "",
+  model: process.env.LLM_WIKI_FALLBACK_MODEL || "deepseek-v4-flash",
   /** Fallback endpoint — set via LLM_WIKI_FALLBACK_ENDPOINT */
-  endpoint: process.env.LLM_WIKI_FALLBACK_ENDPOINT || "",
+  endpoint: process.env.LLM_WIKI_FALLBACK_ENDPOINT || "https://api.deepseek.com/v1/chat/completions",
   /** Environment variable name for fallback API key */
-  keyVar: "SILICONFLOW_API_KEY",
+  keyVar: "DEEPSEEK_API_KEY",
   /** Timeout (ms) — override via LLM_WIKI_FALLBACK_TIMEOUT_MS */
   timeoutMs: Number(process.env.LLM_WIKI_FALLBACK_TIMEOUT_MS) || 15_000,
   /** Max tokens — override via LLM_WIKI_FALLBACK_MAX_TOKENS */

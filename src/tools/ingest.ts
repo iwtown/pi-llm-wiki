@@ -13,9 +13,37 @@ import { writeFile, appendToFile, ping } from "../client";
 import { detectProject } from "../project";
 import { PATHS, INGEST_MAX_CHARS, LLM_WIKI } from "../config";
 import { logChange } from "../system/changes";
-import { dlog } from "../system/log";
+import { dlog, slog } from "../system/log";
+import { parseFrontmatter } from "../system/parse";
 
 const VAULT_BASE = LLM_WIKI.vault;
+
+// ── Session ID dedup cache (built at before_start, updated at ingest) ──
+
+export const ingestedSessionIds = new Set<string>();
+
+/** Build session ID index from all existing raw session files */
+export function buildIngestedIndex(vaultBase: string): void {
+  ingestedSessionIds.clear();
+  const rawDir = path.join(vaultBase, PATHS.rawSessions);
+  try {
+    for (const proj of fs.readdirSync(rawDir)) {
+      const projDir = path.join(rawDir, proj);
+      if (!fs.statSync(projDir).isDirectory()) continue;
+      for (const f of fs.readdirSync(projDir)) {
+        if (!f.endsWith(".md")) continue;
+        const content = fs.readFileSync(path.join(projDir, f), "utf-8");
+        const fm = parseFrontmatter(content);
+        if (typeof fm.session_id === "string" && fm.session_id) {
+          ingestedSessionIds.add(fm.session_id);
+        }
+      }
+    }
+    dlog(`Ingested session index built: ${ingestedSessionIds.size} entries`);
+  } catch {
+    // non-fatal; index will be rebuilt at next startup
+  }
+}
 
 // ── Phase 4: Session quality scoring ──
 
@@ -130,18 +158,8 @@ async function writeWithFallback(
 }
 
 /** Check if the parent session (or its direct child) has already been ingested */
-function checkParentIngested(parentSessionId: string, projectName: string): boolean {
-  const rawDir = path.join(VAULT_BASE, PATHS.rawSessions, projectName);
-  try {
-    const existing = fs.readdirSync(rawDir).filter((f) => f.endsWith(".md"));
-    for (const f of existing) {
-      const fileContent = fs.readFileSync(path.join(rawDir, f), "utf-8");
-      if (fileContent.includes(`session_id: "${parentSessionId}"`)) {
-        return true;
-      }
-    }
-  } catch { /* dir may not exist yet */ }
-  return false;
+function checkParentIngested(parentSessionId: string): boolean {
+  return ingestedSessionIds.has(parentSessionId);
 }
 
 export async function ingest(
@@ -157,8 +175,7 @@ export async function ingest(
 
   // Phase 1: Fork detection — if this is a subagent fork, check if parent already ingested
   if (parentSessionId) {
-    const parentDone = checkParentIngested(parentSessionId, projectName);
-    if (parentDone) {
+    if (checkParentIngested(parentSessionId)) {
       dlog(`Fork session (parent=${parentSessionId}): skipped (parent already ingested)`);
       return { path: "", project: projectName, writeMode: "skip" };
     }
@@ -169,40 +186,28 @@ export async function ingest(
   const topicLine = (contentLines[0] ?? "").replace(/^#+\s*/, "").trim() || "session";
   const score = scoreContent(content);
   if (score.isTrivial) {
-    dlog(`Trivial session skipped (score: ${score.score}/100): "${topicLine.slice(0, 60)}"`);
-    try {
-      const logPath = path.join(process.env.HOME ?? "/home", ".pi/agent/pi-llm-wiki-debug.log");
-      fs.appendFileSync(logPath, `[trivial-skip] score=${score.score} project=${projectName}\n`);
-    } catch { /* non-fatal */ }
+    slog("ingest_trivial_skip", { score: score.score, project: projectName, topic: topicLine.slice(0, 60) });
     return { path: "", project: projectName, writeMode: "skip" };
   }
-
-  // Build safe filename from first meaningful line + timestamp to avoid collisions
-  const firstLine = topicLine;
-  const safeTopic = firstLine.replace(/[^a-zA-Z0-9\u4e00-\u9fff_-]/g, "-").slice(0, 50);
-  // B3 fix: ensure safeTopic is non-empty for filename
-  const safeTopicClean = safeTopic.trim() || "session";
-  const time = new Date().toISOString().split("T")[1]?.replace(/:/g, "").slice(0, 6) ?? "";
-  const fileName = `${date}-${safeTopicClean}-${time}.md`;
-  const vaultPath = `${PATHS.rawSessions}/${projectName}/${fileName}`;
-  const fsPath = path.join(VAULT_BASE, vaultPath);
 
   // Extract session ID from context
   const sessionId = (ctx as ExtendedContext).sessionManager?.getSessionId?.() ?? "";
 
-  // G7: Check if this session was already ingested (dedup by session_id)
-  if (sessionId) {
-    const rawDir = path.join(VAULT_BASE, PATHS.rawSessions, projectName);
-    try {
-      const existing = fs.readdirSync(rawDir).filter((f) => f.endsWith(".md"));
-      for (const f of existing) {
-        const fileContent = fs.readFileSync(path.join(rawDir, f), "utf-8");
-        if (fileContent.includes(`session_id: "${sessionId}"`)) {
-          dlog(`Session ${sessionId} already ingested, skipping`);
-          return { path: vaultPath, project: projectName, writeMode: "skip" };
-        }
-      }
-    } catch { /* dir may not exist yet */ }
+  // Build stable filename: session_id short prefix for collision-free naming + topic for readability
+  const firstLine = topicLine;
+  const sessionIdShort = sessionId ? sessionId.split("-")[0] || sessionId.slice(-8) : "";
+  const idPrefix = sessionIdShort ? `${sessionIdShort}-` : "";
+  const safeTopic = firstLine.replace(/[^a-zA-Z0-9\u4e00-\u9fff_-]/g, "-").slice(0, 50);
+  const safeTopicClean = safeTopic.trim() || "session";
+  const time = new Date().toISOString().split("T")[1]?.replace(/:/g, "").slice(0, 6) ?? "";
+  const fileName = `${date}-${idPrefix}${safeTopicClean}-${time}.md`;
+  const vaultPath = `${PATHS.rawSessions}/${projectName}/${fileName}`;
+  const fsPath = path.join(VAULT_BASE, vaultPath);
+
+  // Session ID dedup: check in-memory index (built at before_start, O(1))
+  if (sessionId && ingestedSessionIds.has(sessionId)) {
+    dlog(`Session ${sessionId} already ingested (from index), skipping`);
+    return { path: vaultPath, project: projectName, writeMode: "skip" };
   }
 
   // B2 fix: template already includes Task checkbox — no need to append again
@@ -211,6 +216,11 @@ export async function ingest(
   const writeMode = await writeWithFallback(vaultPath, fsPath, template);
   if (writeMode === "fail") {
     throw new Error(`Failed to write session to both API and filesystem: ${vaultPath}`);
+  }
+
+  // Update in-memory index (avoids re-scan on duplicate agent_end or re-ingest)
+  if (sessionId) {
+    ingestedSessionIds.add(sessionId);
   }
 
   // Append to log.md

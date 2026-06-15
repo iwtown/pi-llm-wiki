@@ -5,7 +5,7 @@
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { ingest } from "../tools/ingest";
+import { ingest, ingestedSessionIds } from "../tools/ingest";
 import { detectProject } from "../project";
 import { LLM_WIKI } from "../config";
 import { fileDlog, slog } from "../system/log";
@@ -225,38 +225,67 @@ export function buildUnifiedSummary(
 export async function autoIngest(pi: ExtensionAPI): Promise<void> {
   pi.on("agent_end", async (event, ctx) => {
     const startTime = Date.now();
-    fileDlog(`agent_end fired, sessionManager=${!!ctx.sessionManager}, getBranch=${typeof ctx.sessionManager?.getBranch}`);
     const sessionId = (ctx as ExtendedContext).sessionManager?.getSessionId?.() ?? "";
+    const extCtx = ctx as ExtendedContext;
+    const parentSessionId = extCtx.parentSessionId ?? extCtx.forkParentId ?? "";
+
     try {
-      // Check if obs_ingest was already called this session
+      // ── Optimized flow: early exits before loading branch ──
+
+      // [A] Fork child early skip: parent already ingested → child content is redundant
+      if (parentSessionId && ingestedSessionIds.has(parentSessionId)) {
+        markIngested(pi);
+        slog("auto_ingest_fork_skip", { sessionId, parentSessionId });
+        return;
+      }
+
+      // Load branch (lazy — skip tiny sessions without full traversal)
       const entries = ctx.sessionManager?.getBranch?.() ?? [];
-      fileDlog(`getBranch returned ${entries.length} entries`);
+      fileDlog(`getBranch returned ${entries.length} entries, parentSessionId=${parentSessionId || "-"}`);
+
+      // [B] Tiny entry count → certainly trivial, skip immediately
+      if (entries.length < 5) {
+        fileDlog(`skip: tiny session (${entries.length} entries)`);
+        return;
+      }
+
+      // Check ingested marker (explicit obs_ingest was already called)
       const alreadyIngested = entries.some(
         (e: any) => e.type === "custom" && e.customType === INGEST_MARKER
       );
-      fileDlog(`alreadyIngested=${alreadyIngested}`);
-      if (alreadyIngested) return; // skip — explicit ingest was done
+      if (alreadyIngested) return;
 
-      // Skip trivial sessions: single user message with short user input AND few assistant responses
+      // Extract user messages + count assistant responses for triviality + summary
       const userMsgs = extractUserMessages(entries);
-      const totalUserChars = userMsgs.reduce((sum, m) => sum + m.length, 0);
       const assistantCount = entries.filter((e: any) =>
         (e.type === "message" && e.message?.role === "assistant") ||
         (e.type === "assistant")
       ).length;
+
+      // [C] Quick triviality check (O(1) after extraction)
+      const totalUserChars = userMsgs.reduce((sum, m) => sum + m.length, 0);
       const totalContentChars = entries.reduce((sum: number, e: any) => {
         const text = extractMessageText(e.message ?? e);
         return sum + (text?.length || 0);
       }, 0);
 
       if (userMsgs.length <= 1 && totalUserChars < 200 && assistantCount <= 3 && totalContentChars < 500) {
-        fileDlog(`skip: trivial session (${userMsgs.length} user msgs, ${totalUserChars} user chars, ${assistantCount} assistant, ${totalContentChars} total chars)`);
+        fileDlog(`skip: trivial session (${userMsgs.length} user msgs, ${totalUserChars} chars)`);
+        slog("auto_ingest_trivial", { sessionId, userMsgs: userMsgs.length, totalChars: totalContentChars });
         return;
       }
 
-      // P2: Build summary using tiered approach (OM → extract → skip)
-      const { obs, refs } = extractObservations(entries);
-      fileDlog(`extracted obs=${obs.length} refs=${refs.length}`);
+      // [D] Conditional OM extraction — only for substantial sessions with assistant activity
+      let obs: OmObservation[] = [];
+      let refs: OmReflection[] = [];
+      if (entries.length > 20 && assistantCount > 3) {
+        const extracted = extractObservations(entries);
+        obs = extracted.obs;
+        refs = extracted.refs;
+        fileDlog(`extracted obs=${obs.length} refs=${refs.length}`);
+      }
+
+      // Build summary (Tier 1: OM → Tier 2: extract → Tier 3: skip)
       const { summary, tier } = buildUnifiedSummary(entries, { obs, refs });
       fileDlog(`summary tier: ${tier}`);
 
@@ -265,25 +294,26 @@ export async function autoIngest(pi: ExtensionAPI): Promise<void> {
         return;
       }
 
-      // Phase 1: Extract parentSessionId from context (for subagent fork detection)
-      const extCtx = ctx as ExtendedContext;
-      const parentSessionId = extCtx.parentSessionId ??
-                              extCtx.forkParentId ??
-                              "";
-      if (parentSessionId) {
-        fileDlog(`detected fork session, parentSessionId=${parentSessionId}`);
-      }
-
       fileDlog(`calling ingest, summary length=${summary.length}, ctx.cwd=${ctx.cwd}`);
       await ingest(summary, { ...ctx, parentSessionId } as ExtendedContext);
-      markIngested(pi); // set session marker so 2nd agent_end skips
+      markIngested(pi);
       fileDlog(`ingest completed in ${Date.now() - startTime}ms`);
+
       const logProject = detectProject(ctx.cwd ?? process.cwd());
-      slog("auto_ingest_ok", { project: logProject?.name ?? "unknown", sessionId, durationMs: Date.now() - startTime, hasOmData: obs.length > 0 || refs.length > 0 });
+      slog("auto_ingest_ok", {
+        project: logProject?.name ?? "unknown",
+        sessionId,
+        durationMs: Date.now() - startTime,
+        hasOmData: obs.length > 0 || refs.length > 0,
+      });
+
+      if (ctx.hasUI && logProject?.name) {
+        ctx.ui?.notify(`📝 已自动复盘此会话 → ${logProject.name}`, "info");
+      }
     } catch (e: any) {
       fileDlog(`Auto-ingest FAILED: ${e.message}`);
       if (e.stack) fileDlog(`Stack: ${e.stack}`);
-      slog("auto_ingest_fail", { error: e.message, sessionId });
+      slog("auto_ingest_fail", { error: e.message, sessionId, stack: e.stack });
     }
   });
 }

@@ -5,7 +5,7 @@
  */
 
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { search, smartSearch, readFile, appendToFile } from "../client";
+import { search, smartSearch, readFile, appendToFile, writeFile } from "../client";
 import { QUERY_DEFAULT_LIMIT, PATHS, LLM_WIKI } from "../config";
 
 import * as fs from "node:fs";
@@ -299,5 +299,46 @@ export async function query(
     // non-fatal
   }
 
+  // Track query stats for top results (fire-and-forget, non-blocking)
+  for (const r of merged.slice(0, 3)) {
+    // Only track wiki/ pages, not zinbox or raw
+    if (r.path.startsWith("wiki/")) {
+      trackQueryHit(r.path, date).catch(() => {});
+    }
+  }
+
   return merged.slice(0, limit);
 }
+
+// ─── Query tracking (Layer 3: implicit feedback) ───
+
+/**
+ * Track that a wiki page was queried — updates frontmatter stats.
+ * Fire-and-forget: never blocks query return.
+ */
+async function trackQueryHit(filePath: string, date: string): Promise<void> {
+  try {
+    const content = await readFile(filePath);
+
+    // Check if queried_count already exists
+    if (/^queried_count:\s*\d+$/m.test(content)) {
+      const updated = content
+        .replace(/^(queried_count:\s*)(\d+)$/m, (_, label, count) =>
+          `${label}${parseInt(count, 10) + 1}`
+        )
+        .replace(/^(last_queried:\s*).+$/m, `$1${date}`);
+      await writeFile(filePath, updated);
+    } else {
+      // Insert queried_count + last_queried before the closing ---
+      const fmEnd = content.indexOf("\n---", 4);
+      if (fmEnd > 0) {
+        const before = content.slice(0, fmEnd + 4);
+        const after = content.slice(fmEnd + 4);
+        await writeFile(filePath, before + `\nqueried_count: 1\nlast_queried: ${date}` + after);
+      }
+    }
+  } catch {
+    // non-fatal: tracking failure shouldn't affect query result
+  }
+}
+

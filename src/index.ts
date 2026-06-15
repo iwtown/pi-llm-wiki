@@ -15,7 +15,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 
-import { injectSchema, injectPipelineCheck } from "./hooks/before-start";
+import { injectSchema, injectPipelineCheck, buildIngestCache } from "./hooks/before-start";
 import { autoIngest } from "./hooks/agent-end";
 import { registerStartupRecovery } from "./hooks/startup-recovery";
 import { refreshSystemPages } from "./system/refresh";
@@ -35,6 +35,8 @@ export default function (pi: ExtensionAPI) {
   injectPipelineCheck(pi).catch((e) =>
     dlog(`pipeline-check hook failed: ${e}`)
   );
+  // Build session ID dedup cache (non-blocking, runs at startup)
+  buildIngestCache();
   autoIngest(pi).catch((e) =>
     dlog(`agent-end hook failed: ${e}`)
   );
@@ -51,7 +53,10 @@ export default function (pi: ExtensionAPI) {
       "Keywords: 查知识库, 搜索wiki, 之前怎么做的.\n\n" +
       "IMPORTANT: For known categories (concepts/decisions/discoveries/commands/projects), " +
       "just read the Dataview index (wiki/索引/某类.md) to list pages, then read the target directly. " +
-      "Faster, no API call. Use obs_query only for fuzzy or cross-category search.",
+      "Faster, no API call. Use obs_query only for fuzzy or cross-category search.\n\n" +
+      "写作规则：每个新页面需 ≥2 条 [[wikilinks]]；写入前先搜索避免重复；" +
+      "禁止创建孤立节点；用中文标题；不硬编码密钥。" +
+      "完整宪法见 wiki/宪法.md。",
     parameters: Type.Object({
       query: Type.String({ description: "Search query." }),
       scope: Type.Optional(
@@ -93,7 +98,9 @@ export default function (pi: ExtensionAPI) {
     description:
       "Admin operations on the LLM-Wiki. Use the `action` parameter to pick which: " +
       "capture (save insight), reference (cross-vault ref), aggregate (quarterly summary), distill (compress logs). " +
-      "Keywords: 记下来, capture, 跨库, aggregate, 聚合, distill, 蒸馏.",
+      "Keywords: 记下来, capture, 跨库, aggregate, 聚合, distill, 蒸馏.\n\n" +
+      "保存规则：用中文标题；tags 首个为 wiki/类型 (概念/决策/发现/命令/流程/规则/提示)；" +
+      "写入前先搜索避免重复。完整宪法见 wiki/宪法.md。",
     parameters: Type.Object({
       action: Type.String({ description: "One of: capture, reference, aggregate, distill." }),
       // capture params

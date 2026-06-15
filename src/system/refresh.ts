@@ -21,6 +21,7 @@ import { readChangeLog, getCachedFiles, updateCache, needsFullScan, isRelevantPe
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { scoreContent } from "../tools/ingest";
 import { dlog } from "./log";
+import { assessAllQuality } from "../tools/quality";
 
 const VAULT = LLM_WIKI.vault;
 
@@ -153,17 +154,24 @@ function scanPendingSessions(): string[] {
   return incrementalScanPending();
 }
 
+/** Batch limit per pipeline run: avoids blocking session start for too long.
+ *  Remaining sessions are picked up on the next before_agent_start hook. */
+const BATCH_SIZE = 15;
+
 // ── Auto-compile (Phase 2: delegates to compile.ts) ──
 
 async function autoCompile(): Promise<{ wikiPaths: string[]; rawPaths: string[] }> {
   const pending = scanPendingSessions();
   if (pending.length < COMPILE_THRESHOLD) return { wikiPaths: [], rawPaths: [] };
 
+  const batch = pending.slice(0, BATCH_SIZE);
+  const remaining = pending.length - batch.length;
+
   const newWikiPaths: string[] = [];
   const compiledRawPaths: string[] = [];
   const ctx = { cwd: process.cwd() } as ExtensionContext;
 
-  for (const rawPath of pending) {
+  for (const rawPath of batch) {
     try {
       // Phase 4: Skip trivial sessions (score < 30 or marked trivial)
       const rawFullPath = path.join(VAULT, rawPath);
@@ -199,6 +207,10 @@ async function autoCompile(): Promise<{ wikiPaths: string[]; rawPaths: string[] 
     }
   }
 
+  if (remaining > 0) {
+    dlog(`⏸️ ${remaining} more sessions pending — will compile on next session start`);
+  }
+
   // Also mark any pending sessions that are in the "fork-merged" or "trivial"
   // state — they were marked compiled in Phase 0 but may still appear pending
   // if the frontmatter format doesn't match compile.ts expectations.
@@ -227,12 +239,13 @@ async function autoCompile(): Promise<{ wikiPaths: string[]; rawPaths: string[] 
 
 // ── Auto-weave: append backlinks to pages referenced by new wiki pages ──
 
-function autoWeave(newWikiPaths: string[]): number {
-  if (newWikiPaths.length === 0) return 0;
+function autoWeave(newWikiPaths: string[]): string[] {
+  if (newWikiPaths.length === 0) return [];
   const now = new Date().toISOString().split("T")[0];
-  let updated = 0;
+  const wovenPaths: string[] = [];
 
   for (const wikiPath of newWikiPaths) {
+    let pageHadLink = false;
     try {
       const fullPath = path.join(VAULT, wikiPath);
       const content = fs.readFileSync(fullPath, "utf-8");
@@ -266,31 +279,30 @@ function autoWeave(newWikiPaths: string[]): number {
         const logSection = "## 📋 经验日志";
 
         if (targetContent.includes(logSection)) {
-          // Append to existing log section
           const updatedTarget = targetContent.replace(
             logSection,
             `${logSection}\n${logEntry}`
           );
           fs.writeFileSync(targetFull, updatedTarget, "utf-8");
         } else if (!targetContent.includes(logEntry)) {
-          // Create log section at end
           fs.writeFileSync(
             targetFull,
             targetContent.trimEnd() + `\n\n${logSection}\n${logEntry}\n`,
             "utf-8"
           );
         }
-        updated++;
+        pageHadLink = true;
       }
+      if (pageHadLink) wovenPaths.push(wikiPath);
     } catch (e: any) {
       dlog(`auto-weave error for ${wikiPath}: ${e.message}`);
     }
   }
 
-  if (updated > 0) {
-    appendLog("weave", `${updated} backlinks added across ${newWikiPaths.length} new pages`);
+  if (wovenPaths.length > 0) {
+    appendLog("weave", `${wovenPaths.length}/${newWikiPaths.length} pages woven`);
   }
-  return updated;
+  return wovenPaths;
 }
 
 // ── ZInBox auto-compile (Phase 5: + score gate + incremental + insight extraction) ──
@@ -351,8 +363,9 @@ function autoCompileZinbox(): string[] {
 
   // Find uncompiled files
   const existingIndexes = new Set(fs.readdirSync(indexDir));
-  const existingPaths = new Set(collectWikiPages().map((p) => p.path.replace(/\.md$/, "")));
-  const existingTitles = new Set(collectWikiPages().map((p) => p.title));
+  const allWikiPages = collectWikiPages();
+  const existingPaths = new Set(allWikiPages.map((p) => p.path.replace(/\.md$/, "")));
+  const existingTitles = new Set(allWikiPages.map((p) => p.title));
   const newWikiPaths: string[] = [];
   let compiled = 0;
 
@@ -460,6 +473,14 @@ function runAutoLint(): void {
     } else {
       appendLog("lint", `✅ 健康 — ${report.total} pages`);
     }
+
+    // Quality assessment (Layer 4): score all pages + log summary
+    const quality = assessAllQuality();
+    const qSum =
+      `✅≥4 ${quality.healthy} / 🟡=3 ${quality.fair} / ⚠️<3 ${quality.low}` +
+      (quality.stale > 0 ? ` / 🗄️失活 ${quality.stale}` : "");
+    appendLog("quality", `得分: ${qSum}`);
+    dlog(`📊 Quality: ${quality.total} pages — ${qSum}`);
   } catch (e: any) {
     dlog(`auto-lint error: ${e.message}`);
   }
@@ -470,6 +491,17 @@ function runAutoLint(): void {
 export function refreshSystemPages(pi: ExtensionAPI): void {
   pi.on("before_agent_start", async () => {
     try {
+      // Backlog visibility: show pending count before pipeline
+      const pendingCount = scanPendingSessions().length;
+      if (pendingCount >= COMPILE_THRESHOLD) {
+        const compileBatch = Math.min(pendingCount, BATCH_SIZE);
+        const extra = pendingCount - compileBatch;
+        const suffix = extra > 0 ? ` (+ ${extra} left for next run)` : "";
+        dlog(`📦 Pipeline: ${pendingCount} pending — compiling ${compileBatch}${suffix}`);
+      } else if (pendingCount > 0) {
+        dlog(`📦 Backlog: ${pendingCount} sessions pending (need ${COMPILE_THRESHOLD} to trigger batch compile)`);
+      }
+
       // Step 1: Auto-compile (if enough pending raw sessions)
       const { wikiPaths, rawPaths } = await autoCompile();
       let newPages = [...wikiPaths];
@@ -482,23 +514,31 @@ export function refreshSystemPages(pi: ExtensionAPI): void {
       }
 
       if (newPages.length > 0) {
-        dlog(`Auto-compiled ${newPages.length} total`);
+        dlog(`🔄 Compiled ${newPages.length} new wiki pages`);
 
         // Step 2: Auto-weave backlinks
-        const woven = autoWeave(newPages);
-        dlog(`Auto-weave: ${woven} backlinks`);
+        const wovenPaths = autoWeave(newPages);
+        const wovenSet = new Set(wovenPaths);
+        dlog(`Auto-weave: ${wovenPaths.length}/${newPages.length} pages woven`);
 
-        // Phase 5: Advance pipeline state — mark all compiled sessions as woven + linted
-        // since the full auto-pipeline (compile → weave → lint → status) ran in one pass
-        for (const rawPath of rawPaths) {
-          try {
-            await markWeaved(rawPath);
-            await markLinted(rawPath);
-          } catch { /* non-fatal */ }
+        // Phase 5: Advance pipeline state — only mark sessions as woven + linted
+        // if their wiki pages were successfully processed. Failed weaves will be
+        // retried on the next pipeline run (sessions stay pending).
+        let advancedCount = 0;
+        for (let i = 0; i < rawPaths.length; i++) {
+          // wikiPaths[i] corresponds to rawPaths[i] (parallel arrays from autoCompile)
+          if (i < wikiPaths.length && wovenSet.has(wikiPaths[i])) {
+            try {
+              await markWeaved(rawPaths[i]);
+              await markLinted(rawPaths[i]);
+              advancedCount++;
+            } catch { /* non-fatal per-session */ }
+          }
         }
-        if (rawPaths.length > 0) {
-          dlog(`Pipeline: ${rawPaths.length} sessions advanced to done`);
+        if (advancedCount > 0) {
+          dlog(`Pipeline: ${advancedCount}/${rawPaths.length} sessions advanced to done`);
         }
+        dlog(`✅ Pipeline: compiled ${newPages.length}, woven ${wovenPaths.length}/${newPages.length}`);
       }
 
       // Step 3: Auto-lint (always, to keep log.md up-to-date)
@@ -506,7 +546,6 @@ export function refreshSystemPages(pi: ExtensionAPI): void {
 
       // Step 4: Regenerate status page
       writeSystemPage("wiki/状态.md", generateStatus());
-      dlog("Status page refreshed");
     } catch (e: any) {
       dlog(`Hook error: ${e.message}`);
     }
