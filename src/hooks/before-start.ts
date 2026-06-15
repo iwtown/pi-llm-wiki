@@ -5,28 +5,15 @@
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { readFile, ping } from "../client";
+import { readFile } from "../client";
 import { PATHS, LLM_WIKI, COMPILE_THRESHOLD } from "../config";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { dlog, slog } from "../system/log";
 import { buildIngestedIndex } from "../tools/ingest";
+import { getUncompiledSessions } from "../manifest";
 import { detectProject } from "../project";
 import { parseFrontmatter } from "../system/parse";
-
-/** Retry a promise-returning function with delay */
-async function retry<T>(fn: () => Promise<T>, retries: number, delayMs: number): Promise<T> {
-  let lastErr: unknown;
-  for (let i = 0; i <= retries; i++) {
-    try {
-      return await fn();
-    } catch (e) {
-      lastErr = e;
-      if (i < retries) await new Promise((r) => setTimeout(r, delayMs));
-    }
-  }
-  throw lastErr;
-}
 
 let schemaCache: string | null = null;
 let schemaCacheTime = 0;
@@ -41,25 +28,10 @@ export async function injectSchema(pi: ExtensionAPI): Promise<void> {
         return { systemPrompt: event.systemPrompt + prefix };
       }
 
-      // Try REST API first, fallback to filesystem
-      let online = await ping();
-      if (!online) {
-        await new Promise((r) => setTimeout(r, 1000));
-        online = await ping();
-      }
-      let schema: string;
-
-      if (online) {
-        schema = await retry(() => readFile(PATHS.schema), 2, 500);
-      } else {
-        schema = fs.readFileSync(`${LLM_WIKI.vault}/${PATHS.schema}`, "utf-8");
-      }
-
-      // Update cache
-      schemaCache = schema;
+      schemaCache = readFile(PATHS.schema);
       schemaCacheTime = Date.now();
 
-      const prefix = buildSystemPromptPrefix(schema, ctx.cwd);
+      const prefix = buildSystemPromptPrefix(schemaCache, ctx.cwd);
       return { systemPrompt: event.systemPrompt + prefix };
     } catch (e: any) {
       dlog(`Failed to inject schema: ${e.message}`);
@@ -168,28 +140,7 @@ function buildKnowledgePreview(cwd: string): string {
 // ─── Auto-pipeline check (fire-and-forget, non-blocking) ───
 
 function countPendingRaw(): number {
-  const rawDir = path.join(LLM_WIKI.vault, PATHS.rawSessions);
-  let count = 0;
-  try {
-    const projects = fs.readdirSync(rawDir);
-    for (const proj of projects) {
-      const projDir = path.join(rawDir, proj);
-      if (!fs.statSync(projDir).isDirectory()) continue;
-      const files = fs.readdirSync(projDir).filter((f) => f.endsWith(".md"));
-      for (const file of files) {
-        const content = fs.readFileSync(path.join(projDir, file), "utf-8");
-        const fm = content.match(/^---\n([\s\S]*?)\n---/);
-        if (!fm) continue;
-        const compiled = fm[1].match(/compiled:\s*(true|\d)/);
-        if (compiled) continue; // already compiled
-        const scoreMatch = fm[1].match(/session_score:\s*(\d+)/);
-        const score = scoreMatch ? parseInt(scoreMatch[1], 10) : 0;
-        if (score > 0 && score < 50) continue; // low quality
-        count++;
-      }
-    }
-  } catch { /* non-fatal */ }
-  return count;
+  return getUncompiledSessions().length;
 }
 
 /** Lightweight auto-pipeline check — only warns when backlog exceeds threshold */

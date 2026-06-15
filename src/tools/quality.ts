@@ -124,8 +124,19 @@ function scoreAndWrite(filePath: string, content: string): QualityInfo | null {
       };
     }
 
+    // Build human-readable quality_reason
+    const reasons: string[] = [`confidence:${confidence}`];
+    if (emptyPenalty > 0) reasons.push(`penalty:-${emptyPenalty}`);
+    if (queriedCount > 0) reasons.push(`queries:${queriedCount}`);
+    if (daysQ !== null && daysQ > 30) reasons.push(`decay:-${Math.floor(daysQ / 30) * 0.5}`);
+    if (isStale) reasons.push(`stale_floor:2`);
+    const reasonStr = reasons.join(", ");
+
     let updated = content;
-    if (oldScore !== qualityScore) updated = setFmField(updated, "quality_score", qualityScore);
+    if (oldScore !== qualityScore) {
+      updated = setFmField(updated, "quality_score", qualityScore);
+      updated = setFmField(updated, "quality_reason", reasonStr);
+    }
     if (oldDaysQ !== daysQ && daysQ !== null) updated = setFmField(updated, "days_since_query", daysQ);
     if (oldStale !== stale) updated = setFmField(updated, "stale", stale ? "true" : "false");
 

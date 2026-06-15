@@ -5,7 +5,7 @@
  */
 
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { search, smartSearch, readFile, appendToFile, writeFile } from "../client";
+import { readFile, appendToFile, writeFile } from "../client";
 import { QUERY_DEFAULT_LIMIT, PATHS, LLM_WIKI } from "../config";
 
 import * as fs from "node:fs";
@@ -204,69 +204,35 @@ export async function query(
   const remaining = limit - atlasResults.length;
   let searchResults: QueryResult[] = [];
 
-  // 2a: Try semantic search first
+  // 2: Full-text search via ripgrep
   try {
-    const smartRaw = await smartSearch(queryStr, remaining * 2);
-    if (smartRaw.length > 0) {
-      const enriched = await Promise.all(
-        smartRaw.map(
-          async (r) => {
-            const result = await enrichResult(
-              r.path,
-              r.text?.slice(0, 200) ?? "",
-              r.score,
-            );
-            result.source = "semantic";
-            // full: fetch body content
-            if (depth === "full") {
-              try {
-                const body = await readFile(r.path);
-                const bodyText = body.replace(/^---\n[\s\S]*?\n---\n?/, "").trim();
-                result.snippet = bodyText.slice(0, 500);
-              } catch {
-                // keep existing snippet
-              }
+    const raw = fullTextSearch(queryStr, remaining * 2);
+    const enriched = await Promise.all(
+      raw.map(
+        async (r) => {
+          const result = await enrichResult(
+            r.filename,
+            r.context?.slice(0, 200) ?? "",
+            r.score,
+          );
+          result.source = "search";
+          // full: fetch body content
+          if (depth === "full") {
+            try {
+              const body = await readFile(r.filename);
+              const bodyText = body.replace(/^---\n[\s\S]*?\n---\n?/, "").trim();
+              result.snippet = bodyText.slice(0, 500);
+            } catch {
+              // keep existing snippet
             }
-            return result;
           }
-        )
-      );
-      searchResults = enriched;
-    }
+          return result;
+        }
+      )
+    );
+    searchResults = enriched;
   } catch {
-    // Smart search unavailable, fall through to simple search
-  }
-
-  // 2b: Fallback to full-text search if semantic search returns nothing
-  if (searchResults.length === 0) {
-    try {
-      const raw = await search(queryStr, remaining * 2);
-      const enriched = await Promise.all(
-        raw.map(
-          async (r) => {
-            const result = await enrichResult(
-              r.filename,
-              r.matches?.[0]?.context?.slice(0, 200) ?? "",
-              r.score,
-            );
-            // full: fetch body content
-            if (depth === "full") {
-              try {
-                const body = await readFile(r.filename);
-                const bodyText = body.replace(/^---\n[\s\S]*?\n---\n?/, "").trim();
-                result.snippet = bodyText.slice(0, 500);
-              } catch {
-                // keep existing snippet
-              }
-            }
-            return result;
-          }
-        )
-      );
-      searchResults = enriched.map((r) => ({ ...r, source: "search" as const }));
-    } catch {
-      // search unavailable
-    }
+    // search unavailable
   }
 
   // C1: Filter search results by scope
@@ -311,6 +277,32 @@ export async function query(
 }
 
 // ─── Query tracking (Layer 3: implicit feedback) ───
+
+/** Ripgrep-based full-text search (no REST API dependency) */
+interface FtsResult { filename: string; score: number; context?: string; }
+function fullTextSearch(query: string, limit: number): FtsResult[] {
+  const results: FtsResult[] = [];
+  try {
+    const safeQuery = query.replace(/"/g, '\\"');
+    const grep = execSync(
+      `rg -l -i "${safeQuery}" "${LLM_WIKI.vault}/wiki/"`,
+      { timeout: 5000, encoding: "utf-8" }
+    ).trim().split("\n").filter(Boolean).slice(0, limit);
+    for (const f of grep) {
+      const rel = f.replace(LLM_WIKI.vault + "/", "");
+      // Get first match context via rg -C0
+      let ctx = "";
+      try {
+        ctx = execSync(
+          `rg -m1 -i "${safeQuery}" "${f}"`,
+          { timeout: 3000, encoding: "utf-8" }
+        ).trim().slice(0, 200);
+      } catch { /* no match line */ }
+      results.push({ filename: rel, score: 1, context: ctx });
+    }
+  } catch { /* rg not available or failed */ }
+  return results;
+}
 
 /**
  * Track that a wiki page was queried — updates frontmatter stats.

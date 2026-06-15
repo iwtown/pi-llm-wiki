@@ -1,8 +1,8 @@
 /**
  * pi-llm-wiki — Main entry point.
- * Registers 2 knowledge management tools + 3 lifecycle hooks.
+ * Registers 3 knowledge management tools + 3 lifecycle hooks.
  *
- * Tools: obs-query (retrieval), obs-admin (capture/reference/aggregate/distill)
+ * Tools: obs-query (retrieval), obs-admin (capture/reference/aggregate/distill), obs-rate (feedback)
  * Hooks: before_agent_start (schema + auto-pipeline), agent_end (auto ingest), startup-recovery
  *
  * Auto-handled (no tool registration needed — run via hooks):
@@ -24,6 +24,7 @@ import { capture } from "./tools/capture";
 import { reference } from "./tools/reference";
 import { aggregate } from "./tools/aggregate";
 import { distill } from "./tools/distill";
+import { ratePage } from "./tools/rate";
 import { dlog } from "./system/log";
 
 export default function (pi: ExtensionAPI) {
@@ -175,6 +176,35 @@ export default function (pi: ExtensionAPI) {
         default:
           return { content: [{ type: "text", text: `❌ Unknown action: ${params.action}. Use: capture, reference, aggregate, distill.` }], details: null };
       }
+    },
+  });
+
+  // ─── Tool: obs-rate — 主动反馈 ───
+
+  pi.registerTool({
+    name: "obs_rate",
+    label: "obs-rate: Rate Wiki Page Quality",
+    description:
+      "评价 wiki 页面的有用性，驱动 quality_score 反馈循环。\n" +
+      "用法: obs_rate path=wiki/发现/xxx.md rating=useful|outdated\n" +
+      "• useful — 知识有帮助，quality_score + 查询计数\n" +
+      "• outdated — 知识已过时，标记 stale，quality_score 下调",
+    parameters: Type.Object({
+      path: Type.String({ description: "Wiki 页面路径，如 wiki/发现/xxx.md" }),
+      rating: Type.String({ description: "评价: useful 或 outdated" }),
+    }),
+    async execute(toolCallId: string, params: { path: string; rating: string }, _signal: AbortSignal, _onUpdate: unknown, _ctx: { cwd: string }) {
+      if (!["useful", "outdated"].includes(params.rating)) {
+        return { content: [{ type: "text", text: "❌ rating 必须是 useful 或 outdated" }], details: null };
+      }
+      const result = ratePage(params.path, params.rating as "useful" | "outdated");
+      if (!result) {
+        return { content: [{ type: "text", text: `❌ 无法评价 ${params.path} — 文件不存在或不可读` }], details: null };
+      }
+      return {
+        content: [{ type: "text", text: `⭐ ${result.message} (score: ${result.quality_score})` }],
+        details: result,
+      };
     },
   });
 }

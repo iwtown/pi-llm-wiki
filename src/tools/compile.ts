@@ -10,7 +10,7 @@
 
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { readFile, writeFile, appendToFile } from "../client";
-import { markCompiled } from "../manifest";
+import { markCompiled, getField } from "../manifest";
 import { PATHS, WIKI_TYPES, LLM_CONFIG, LLM_FALLBACK_CONFIG } from "../config";
 import { logChange } from "../system/changes";
 import { detectProject } from "../project";
@@ -685,20 +685,20 @@ export async function compile(
   }
 
   // Extract frontmatter
-  const fmMatch = content.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
+  const fmMatch = content.match(/^---\n[\s\S]*?\n---\n([\s\S]*)$/);
   if (!fmMatch) return null;
 
-  const frontmatter = fmMatch[1];
-  const body = fmMatch[2];
+  const body = fmMatch[1];
 
   // Determine project name
-  const fmProject = frontmatter.match(/project:\s*"?(.+?)"?\s*$/m)?.[1];
+  const fmProject = String(getField(content, "project") ?? "");
   const project = detectProject(ctx.cwd ?? process.cwd());
-  const projectName = fmProject ?? project?.name ?? "unknown";
+  const projectName = fmProject || project?.name || "unknown";
 
   // Extract and clean title
-  const titleMatch = frontmatter.match(/title:\s*"?(.+?)"?\s*$/m);
-  const rawTitle = titleMatch?.[1] ?? rawPath.split("/").pop()!.replace(".md", "");
+  const fmTitle = getField(content, "title");
+  const rawTitle = typeof fmTitle === "string" && fmTitle
+    ? fmTitle : rawPath.split("/").pop()!.replace(".md", "");
 
   function cleanCompileTitle(t: string): string {
     let c = t.trim();
@@ -716,12 +716,13 @@ export async function compile(
     return c || "未命名记录";
   }
   const title = cleanCompileTitle(rawTitle);
-  const dateMatch = frontmatter.match(/date:\s*(\S+)\s*$/m);
-  const date = dateMatch?.[1] ?? new Date().toISOString().split("T")[0];
+  const fmDate = getField(content, "date");
+  const date = typeof fmDate === "string" && fmDate
+    ? fmDate : new Date().toISOString().split("T")[0];
 
   // Quality gate: skip low-scoring auto-ingested sessions (score < 50)
-  const scoreMatch = frontmatter.match(/session_score:\s*(\d+)/m);
-  const sessionScore = scoreMatch ? parseInt(scoreMatch[1], 10) : 0;
+  const rawScore = getField(content, "session_score");
+  const sessionScore = typeof rawScore === "number" ? rawScore : parseInt(String(rawScore ?? "0"), 10);
   if (sessionScore > 0 && sessionScore < 50) {
     dlog(`Skipping compile: session_score ${sessionScore} < 50 (${rawPath})`);
     await markCompiled(rawPath, { skipped: "low-quality" });

@@ -9,7 +9,7 @@ import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { ExtendedContext } from "../types";
-import { writeFile, appendToFile, ping } from "../client";
+import { writeFile, appendToFile } from "../client";
 import { detectProject } from "../project";
 import { PATHS, INGEST_MAX_CHARS, LLM_WIKI } from "../config";
 import { logChange } from "../system/changes";

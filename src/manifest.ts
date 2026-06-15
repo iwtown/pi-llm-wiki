@@ -1,29 +1,34 @@
 /**
- * pi-llm-wiki — Manifest tracking for compiled/weaved/linted status.
- * Reads/writes frontmatter fields: compiled, weaved, linted on raw/sessions/ files.
+ * pi-llm-wiki — Unified pipeline state tracker.
+ * All frontmatter reads/writes go through this module.
+ * Sources: raw session files (compiled/weaved/linted/status) + wiki pages (quality/queried).
  */
 
-import { readFile, writeFile } from "./client";
-import { PATHS, type PipelineStatus } from "./config";
+import { readFile, writeFile, listDir } from "./client";
+import { PATHS } from "./config";
 import { parseFrontmatter } from "./system/parse";
 
 export { parseFrontmatter };
 
-export interface SessionStatus {
-  path: string; // relative path in vault, e.g. raw/sessions/Pi-Agent/2026-06-05-foo.md
-  compiled: boolean;
-  weaved: boolean;
-  linted: boolean;
-  status?: PipelineStatus; // Phase 5: unified status field
-  title?: string;
-  project?: string;
+// ─── Single-field access (replaces ad-hoc regex across codebase) ───
+
+/** Read a single frontmatter field from file content. Returns undefined if missing. */
+export function getField(content: string, key: string): unknown {
+  const fm = parseFrontmatter(content);
+  return fm[key];
 }
+
+/** Convenient: read file → get field in one sync call */
+export function getFileField(filePath: string, key: string): unknown {
+  return getField(readFile(filePath), key);
+}
+
+// ─── Frontmatter update ───
 
 /** Update frontmatter in markdown text */
 export function updateFrontmatter(md: string, updates: Record<string, unknown>): string {
   const match = md.match(/^---\n([\s\S]*?)\n---/);
   if (!match) {
-    // No frontmatter, create one
     const lines = Object.entries(updates).map(([k, v]) => `${k}: ${quoteYaml(v)}`);
     return `---\n${lines.join("\n")}\n---\n\n${md}`;
   }
@@ -37,143 +42,119 @@ export function updateFrontmatter(md: string, updates: Record<string, unknown>):
 export function quoteYaml(v: unknown): string {
   if (typeof v === "boolean") return String(v);
   if (typeof v === "number") return String(v);
-  if (Array.isArray(v)) {
-    return "[" + v.map(String).join(", ") + "]";
-  }
+  if (Array.isArray(v)) return "[" + v.map(String).join(", ") + "]";
   const s = String(v);
-  if (/[:#\{\}\[\],&\*\?\|<>="'!%@`]/.test(s) || s.includes("\n")) {
+  if (/[:#\{\}\[\],&\*\?\|<>="'!%@`]/.test(s) || s.includes("\n"))
     return `"${s.replace(/"/g, '\\"')}"`;
-  }
   return s;
 }
 
-/** Mark a session as compiled, with optional compile target and linked pages */
-export async function markCompiled(
+// ─── Pipeline state API ───
+
+/** Unified session state from a raw/sessions/ file */
+export interface SessionState {
+  path: string;
+  compiled: boolean;
+  weaved: boolean;
+  linted: boolean;
+  status: string; // "pending" | "compiled" | "woven" | "done" | "skipped"
+  session_score?: number;
+}
+
+/** Read session state from a raw/sessions/ file path */
+export function readSessionState(sessionPath: string): SessionState {
+  const content = readFile(sessionPath);
+  const fm = parseFrontmatter(content);
+  const status = (fm.status as string) || "pending";
+  return {
+    path: sessionPath,
+    compiled: fm.compiled === true || fm.compiled === "true" || ["compiled","woven","done","skipped"].includes(status),
+    weaved: fm.weaved === true || fm.weaved === "true" || ["woven","done"].includes(status),
+    linted: fm.linted === true || fm.linted === "true" || status === "done",
+    status,
+    session_score: typeof fm.session_score === "number" ? fm.session_score : undefined,
+  };
+}
+
+// ─── Pipeline marker functions ───
+
+/** Mark a session as compiled */
+export function markCompiled(
   sessionPath: string,
   options?: { compiledTo?: string; linkedTo?: string[]; skipped?: string }
-): Promise<void> {
-  const content = await readFile(sessionPath);
+): void {
+  const content = readFile(sessionPath);
   const updates: Record<string, unknown> = {
     compiled: true,
     updated: new Date().toISOString().split("T")[0],
   };
-  // Phase 5: set unified status field
   updates.status = options?.skipped ? "skipped" : "compiled";
   if (options?.compiledTo) updates.compiled_to = options.compiledTo;
-  if (options?.linkedTo && options.linkedTo.length > 0) {
+  if (options?.linkedTo && options.linkedTo.length > 0)
     updates.linked_to = options.linkedTo;
-  }
-  const updated = updateFrontmatter(content, updates);
-  await writeFile(sessionPath, updated);
+  writeFile(sessionPath, updateFrontmatter(content, updates));
 }
 
 /** Mark a session as weaved */
-export async function markWeaved(sessionPath: string): Promise<void> {
-  const content = await readFile(sessionPath);
-  const updated = updateFrontmatter(content, { weaved: true, status: "woven" });
-  await writeFile(sessionPath, updated);
+export function markWeaved(sessionPath: string): void {
+  const content = readFile(sessionPath);
+  writeFile(sessionPath, updateFrontmatter(content, { weaved: true, status: "woven" }));
 }
 
 /** Mark a session as linted (pipeline complete) */
-export async function markLinted(sessionPath: string): Promise<void> {
-  const content = await readFile(sessionPath);
-  const updated = updateFrontmatter(content, { linted: true, status: "done" });
-  await writeFile(sessionPath, updated);
+export function markLinted(sessionPath: string): void {
+  const content = readFile(sessionPath);
+  writeFile(sessionPath, updateFrontmatter(content, { linted: true, status: "done" }));
 }
 
-/** Find sessions stuck in pipeline: compiled but not weaved or not linted */
-export async function getStuckSessions(): Promise<
-  Array<{ path: string; hasWeaved: boolean; hasLinted: boolean; compiledTo?: string; linkedTo?: string[]; status?: string }>
-> {
-  const { listDir } = await import("./client");
-  const stuck: Array<{
-    path: string;
-    hasWeaved: boolean;
-    hasLinted: boolean;
-    compiledTo?: string;
-    linkedTo?: string[];
-    status?: string;
-  }> = [];
+// ─── Session scanner ───
 
-  async function walk(dir: string) {
-    try {
-      const entries = await listDir(dir);
-      for (const e of entries) {
-        const full = `${dir}/${e}`;
-        if (e.endsWith(".md")) {
-          const content = await readFile(full);
-          const fm = parseFrontmatter(content);
-          const status = fm.status as string | undefined;
-          // Check old-style booleans OR new-style status field
-          const isCompiled = (fm.compiled === true || fm.compiled === "true")
-            || status === "compiled" || status === "woven" || status === "done";
-          if (isCompiled) {
-            const isDone = status === "done" || status === "skipped" || status === "woven"
-              || (fm.weaved === true || fm.weaved === "true")
-              && (fm.linted === true || fm.linted === "true");
-            if (!isDone) {
-              const hasWeaved = fm.weaved === true || fm.weaved === "true" || status === "woven";
-              const hasLinted = fm.linted === true || fm.linted === "true" || status === "done";
-              stuck.push({
-                path: full,
-                hasWeaved,
-                hasLinted,
-                compiledTo: fm.compiled_to as string | undefined,
-                linkedTo: Array.isArray(fm.linked_to) ? (fm.linked_to as string[]) : undefined,
-                status,
-              });
-            }
-          }
-        } else if (!e.includes(".")) {
-          await walk(full);
+/** Find all sessions that are compiled but not fully processed */
+export function getStuckSessions(): Array<{
+  path: string; hasWeaved: boolean; hasLinted: boolean; compiledTo?: string; linkedTo?: string[]; status?: string;
+}> {
+  const stuck: Array<{
+    path: string; hasWeaved: boolean; hasLinted: boolean;
+    compiledTo?: string; linkedTo?: string[]; status?: string;
+  }> = [];
+  try {
+    const projects = listDir(PATHS.rawSessions);
+    for (const proj of projects) {
+      const projDir = `${PATHS.rawSessions}/${proj}`;
+      const files = listDir(projDir).filter((f) => f.endsWith(".md"));
+      for (const f of files) {
+        const full = `${projDir}/${f}`;
+        const state = readSessionState(full);
+        if (state.compiled && !state.linted) {
+          const content = readFile(full);
+          stuck.push({
+            path: full,
+            hasWeaved: state.weaved,
+            hasLinted: state.linted,
+            status: state.status,
+            compiledTo: String(getField(content, "compiled_to") ?? ""),
+            linkedTo: getField(content, "linked_to") as string[] | undefined,
+          });
         }
       }
-    } catch { /* skip */ }
-  }
-
-  await walk(PATHS.rawSessions);
+    }
+  } catch { /* non-fatal */ }
   return stuck;
 }
 
-/** Get all uncompiled session paths */
-export async function getUncompiledSessions(): Promise<string[]> {
-  const { listDir } = await import("./client");
-  const allFiles: string[] = [];
-
-  // Walk raw/sessions/ directory tree
-  async function walk(dir: string) {
-    try {
-      const entries = await listDir(dir);
-      for (const e of entries) {
-        const full = `${dir}/${e}`;
-        if (e.endsWith(".md")) {
-          allFiles.push(full);
-        } else if (!e.includes(".")) {
-          await walk(full);
-        }
-      }
-    } catch {
-      // directory doesn't exist
-    }
-  }
-
-  await walk(PATHS.rawSessions);
-
-  // Check frontmatter for compiled status (new status field + old boolean compat)
+/** Get all session paths that haven't been compiled yet */
+export function getUncompiledSessions(): string[] {
   const uncompiled: string[] = [];
-  for (const f of allFiles) {
-    try {
-      const content = await readFile(f);
-      const fm = parseFrontmatter(content);
-      const status = fm.status as string | undefined;
-      const isCompiled = (fm.compiled === true || fm.compiled === "true")
-        || status === "compiled" || status === "woven" || status === "done" || status === "skipped";
-      if (!isCompiled) {
-        uncompiled.push(f);
+  try {
+    const projects = listDir(PATHS.rawSessions);
+    for (const proj of projects) {
+      const projDir = `${PATHS.rawSessions}/${proj}`;
+      const files = listDir(projDir).filter((f) => f.endsWith(".md"));
+      for (const f of files) {
+        const full = `${projDir}/${f}`;
+        if (!readSessionState(full).compiled) uncompiled.push(full);
       }
-    } catch {
-      // skip unreadable files
     }
-  }
+  } catch { /* non-fatal */ }
   return uncompiled;
 }

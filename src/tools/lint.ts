@@ -9,6 +9,7 @@ import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { listDir, readFile, writeFile, appendToFile } from "../client";
 import { PATHS, STALE_DAYS } from "../config";
 import { collectWikiPages, detectContradictions, detectDuplicates, detectMissingConcepts } from "../system/analyzer";
+import { getField } from "../manifest";
 
 export interface LintIssue {
   type: "orphan" | "stale" | "broken_link" | "missing_frontmatter" | "duplicate" | "pipeline_stuck" | "missing_concept";
@@ -90,12 +91,10 @@ export async function lint(
           severity: "warning",
         });
       } else {
-        const fm = fmMatch[1];
-
         // Check stale
-        const updatedMatch = fm.match(/updated:\s*(\S+)/);
-        const compiledMatch = fm.match(/compiled:\s*(\S+)/);
-        const lastDate = updatedMatch?.[1] ?? compiledMatch?.[1];
+        const updStr = String(getField(content, "updated") ?? "");
+        const compStr = String(getField(content, "compiled") ?? "");
+        const lastDate = updStr || compStr;
         if (lastDate && lastDate < staleCutoff) {
           issues.push({
             type: "stale",
@@ -105,9 +104,9 @@ export async function lint(
           });
         }
 
-        const titleMatch = fm.match(/title:\s*"?(.+?)"?\s*$/m);
-        if (titleMatch) {
-          allTitles.set(titleMatch[1], fp);
+        const fmTitle = getField(content, "title");
+        if (typeof fmTitle === "string" && fmTitle) {
+          allTitles.set(fmTitle, fp);
         }
       }
 
