@@ -275,7 +275,7 @@ export function parseDistillOutput(output: string): StructuredSections | null {
   }
 
   // Decisions (bullet list under "决策:" line)
-  const decisionsMatch = output.match(/^决策[:：]\n((?:- .*\n?)*)/m);
+  const decisionsMatch = output.match(/^决策[:：][ \t]*\n((?:- .*\n?)*)/m);
   if (decisionsMatch) {
     sections.decisions = filterNone(
       decisionsMatch[1].split("\n").map((l) => l.replace(/^- /, "").trim())
@@ -284,7 +284,7 @@ export function parseDistillOutput(output: string): StructuredSections | null {
   }
 
   // Insights (bullet list under "洞察:" line)
-  const insightsMatch = output.match(/^洞察[:：]\n((?:- .*\n?)*)/m);
+  const insightsMatch = output.match(/^洞察[:：][ \t]*\n((?:- .*\n?)*)/m);
   if (insightsMatch) {
     sections.insights = filterNone(
       insightsMatch[1].split("\n").map((l) => l.replace(/^- /, "").trim())
@@ -293,7 +293,7 @@ export function parseDistillOutput(output: string): StructuredSections | null {
   }
 
   // Issues/遗留
-  const issuesMatch = output.match(/^(?:遗留|待办|问题)[:：]\n((?:- .*\n?)*)/m);
+  const issuesMatch = output.match(/^(?:遗留|待办|问题)[:：][ \t]*\n((?:- .*\n?)*)/m);
   if (issuesMatch) {
     sections.issues = filterNone(
       issuesMatch[1].split("\n").map((l) => l.replace(/^- /, "").trim())
