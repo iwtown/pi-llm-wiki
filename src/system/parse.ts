@@ -30,10 +30,4 @@ export function parseFrontmatter(md: string): Record<string, unknown> {
   return result;
 }
 
-/** Extract a specific string field from frontmatter (sugar) */
-export function getStringField(fm: Record<string, unknown>, key: string, fallback = ""): string {
-  const v = fm[key];
-  if (typeof v === "string") return v;
-  if (typeof v === "boolean" || typeof v === "number") return String(v);
-  return fallback;
-}
+

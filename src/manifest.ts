@@ -18,11 +18,6 @@ export function getField(content: string, key: string): unknown {
   return fm[key];
 }
 
-/** Convenient: read file → get field in one sync call */
-export function getFileField(filePath: string, key: string): unknown {
-  return getField(readFile(filePath), key);
-}
-
 // ─── Frontmatter update ───
 
 /** Update frontmatter in markdown text */
