@@ -10,8 +10,14 @@
     "llm-wiki",
     "knowledge-management"
   ],
-  "dependencies": {
-    "@earendil-works/pi-coding-agent": ">=0.78.0",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/iwtown/pi-llm-wiki.git"
+  },
+  "dependencies": {},
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
     "typebox": "*"
   },
   "engines": {
