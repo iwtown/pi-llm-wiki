@@ -6,6 +6,8 @@
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { ingest, ingestedSessionIds } from "../tools/ingest";
+import { compile } from "../tools/compile";
+import { weave } from "../tools/weave";
 import { detectProject } from "../project";
 import { LLM_WIKI } from "../config";
 import { fileDlog, slog } from "../system/log";
@@ -295,9 +297,26 @@ export async function autoIngest(pi: ExtensionAPI): Promise<void> {
       }
 
       fileDlog(`calling ingest, summary length=${summary.length}, ctx.cwd=${ctx.cwd}`);
-      await ingest(summary, { ...ctx, parentSessionId } as ExtendedContext);
+      const ingestResult = await ingest(summary, { ...ctx, parentSessionId } as ExtendedContext);
       markIngested(pi);
       fileDlog(`ingest completed in ${Date.now() - startTime}ms`);
+
+      // ── Fire-and-forget incremental pipeline: compile → weave ──
+      // Runs on next event loop tick so agent_end can return immediately.
+      // compile writes to wiki/, weave adds backlinks.
+      // lint is deliberately excluded (full-scan, better as periodic manual step).
+      if (ingestResult.writeMode !== "skip" && ingestResult.path) {
+        setImmediate(async () => {
+          try {
+            const cr = await compile(ingestResult.path, {}, ctx);
+            if (cr?.wikiPath && cr.linkedTo?.length) {
+              await weave(ingestResult.path, cr.wikiPath, cr.linkedTo, cr.insights, ctx);
+            }
+          } catch (e: any) {
+            slog("pipeline_error", { path: ingestResult.path, error: e.message });
+          }
+        });
+      }
 
       const logProject = detectProject(ctx.cwd ?? process.cwd());
       slog("auto_ingest_ok", {

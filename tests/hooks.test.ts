@@ -1,7 +1,7 @@
 /**
  * pi-llm-wiki — Tests for lifecycle hooks (agent-end + before-start).
  * Uses exported pure functions directly — no mocking needed for logic tests.
- * Run: LLM_WIKI_TEST_VAULT=/tmp/test-vault-llm-wiki npx tsx --test tests/hooks.test.ts
+ * Run: LLM_WIKI_VAULT=/tmp/test-vault-llm-wiki npx tsx --test tests/hooks.test.ts
  */
 
 import { describe, it } from "node:test";

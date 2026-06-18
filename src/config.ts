@@ -5,10 +5,10 @@
 import * as path from "node:path";
 
 export const LLM_WIKI = {
-  /* WSL2 filesystem path to vault — overridable via LLM_WIKI_TEST_VAULT for testing */
-  vault: process.env.LLM_WIKI_TEST_VAULT || "/mnt/d/DB/Obsidian/LLM-Wiki",
+  /* WSL2 filesystem path to vault — overridable via LLM_WIKI_VAULT (canonical) or LLM_WIKI_TEST_VAULT (compat) */
+  vault: process.env.LLM_WIKI_VAULT || process.env.LLM_WIKI_TEST_VAULT || "/mnt/d/DB/Obsidian/LLM-Wiki",
   /** External clipping vault (ZInBox) — search-only, no copy */
-  zinbox: process.env.LLM_WIKI_TEST_ZINBOX || "/mnt/d/DB/Obsidian/ZInBox",
+  zinbox: process.env.LLM_WIKI_ZINBOX || process.env.LLM_WIKI_TEST_ZINBOX || "/mnt/d/DB/Obsidian/ZInBox",
   /** ZInBox compile tracker (small marker files, no content copy) */
   get zinboxIndex() { return this.vault + "/raw/zinbox-index"; },
 };

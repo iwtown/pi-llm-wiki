@@ -1,6 +1,7 @@
 /**
  * pi-llm-wiki — before_agent_start hook.
  * Injects runtime schema (schema.md, ~800 tokens) into the system prompt.
+ * Also logs a warning when pipeline backlog exceeds threshold (no auto-trigger).
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -136,13 +137,13 @@ function buildKnowledgePreview(cwd: string): string {
   return `\n📚 当前相关:\n${topLine}${restLine}\n---\n`;
 }
 
-// ─── Auto-pipeline check (fire-and-forget, non-blocking) ───
+// ─── Pipeline backlog check (warning-only, no auto-trigger) ───
 
 function countPendingRaw(): number {
   return getUncompiledSessions().length;
 }
 
-/** Lightweight auto-pipeline check — only warns when backlog exceeds threshold */
+/** Lightweight pipeline backlog check — warns when backlog exceeds threshold */
 function checkPipelineHealth(): void {
   try {
     const pending = countPendingRaw();

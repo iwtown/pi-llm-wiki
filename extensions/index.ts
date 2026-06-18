@@ -3,29 +3,28 @@
  * Registers 3 knowledge management tools + 3 lifecycle hooks.
  *
  * Tools: obs-query (retrieval), obs-admin (capture/reference/aggregate/distill), obs-rate (feedback)
- * Hooks: before_agent_start (schema + auto-pipeline), agent_end (auto ingest), startup-recovery
+ * Hooks: before_agent_start (schema + knowledge preview), agent_end (auto ingest → compile → weave), startup-recovery
  *
  * Auto-handled (no tool registration needed — run via hooks):
- *   ingest   → agent_end auto-ingest
- *   compile  → before_agent_start auto-compile (≥5 threshold)
- *   weave    → before_agent_start auto-weave after compile
- *   lint     → before_agent_start auto-lint after compile
+ *   ingest          → agent_end auto-ingest
+ *   compile → weave  → agent_end fire-and-forget (per session, non-blocking)
+ *   lint             → manual (npm run pipeline) — full-scan, not per-session
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 
-import { injectSchema, injectPipelineCheck, buildIngestCache } from "./hooks/before-start";
-import { autoIngest } from "./hooks/agent-end";
-import { registerStartupRecovery } from "./hooks/startup-recovery";
-import { refreshSystemPages } from "./system/refresh";
-import { query } from "./tools/query";
-import { capture } from "./tools/capture";
-import { reference } from "./tools/reference";
-import { aggregate } from "./tools/aggregate";
-import { distill } from "./tools/distill";
-import { ratePage } from "./tools/rate";
-import { dlog } from "./system/log";
+import { injectSchema, injectPipelineCheck, buildIngestCache } from "../src/hooks/before-start";
+import { autoIngest } from "../src/hooks/agent-end";
+import { registerStartupRecovery } from "../src/hooks/startup-recovery";
+import { refreshSystemPages } from "../src/system/refresh";
+import { query } from "../src/tools/query";
+import { capture } from "../src/tools/capture";
+import { reference } from "../src/tools/reference";
+import { aggregate } from "../src/tools/aggregate";
+import { distill } from "../src/tools/distill";
+import { ratePage } from "../src/tools/rate";
+import { dlog } from "../src/system/log";
 
 export default function (pi: ExtensionAPI) {
   // ─── Hooks ───────────────────────────────────────────────
@@ -34,7 +33,7 @@ export default function (pi: ExtensionAPI) {
     dlog(`before-start hook failed: ${e}`)
   );
   injectPipelineCheck(pi).catch((e) =>
-    dlog(`pipeline-check hook failed: ${e}`)
+    dlog(`pipeline-backlog hook failed: ${e}`)
   );
   // Build session ID dedup cache (non-blocking, runs at startup)
   buildIngestCache();
@@ -55,7 +54,7 @@ export default function (pi: ExtensionAPI) {
       "IMPORTANT: For known categories (concepts/decisions/discoveries/commands/projects), " +
       "just read the Dataview index (wiki/索引/某类.md) to list pages, then read the target directly. " +
       "Faster, no API call. Use obs_query only for fuzzy or cross-category search.\n\n" +
-      "写作规则：每个新页面需 ≥2 条 [[wikilinks]]；写入前先搜索避免重复；" +
+      "写作规则：每个新页面需 >=2 条 [[wikilinks]]；写入前先搜索避免重复；" +
       "禁止创建孤立节点；用中文标题；不硬编码密钥。",
     parameters: Type.Object({
       query: Type.String({ description: "Search query." }),
@@ -168,7 +167,7 @@ export default function (pi: ExtensionAPI) {
             return { content: [{ type: "text", text: `📭 ${params.pagePath} 无日志可蒸馏。` }], details: null };
           }
           return {
-            content: [{ type: "text", text: `⚗️ 蒸馏完成: ${result.logCount} 条 → 摘要` }],
+            content: [{ type: "text", text: `⚗️ 蒸馏完成: ${result.logCount} 条 -> 摘要` }],
             details: result,
           };
         }

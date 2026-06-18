@@ -2,7 +2,7 @@
  * pi-llm-wiki — Pipeline integration tests.
  * Tests ingest → compile → weave flow using an isolated temp vault.
  *
- * Run: LLM_WIKI_TEST_VAULT=/tmp/test-vault-llm-wiki npx tsx --test tests/pipeline.test.ts
+ * Run: LLM_WIKI_VAULT=/tmp/test-vault-llm-wiki npx tsx --test tests/pipeline.test.ts
  */
 
 import { describe, it, before, after } from "node:test";
@@ -10,12 +10,12 @@ import assert from "node:assert/strict";
 import * as fs from "node:fs";
 import * as path from "node:path";
 
-const TEST_VAULT = process.env.LLM_WIKI_TEST_VAULT || "/tmp/test-vault-llm-wiki";
+const TEST_VAULT = process.env.LLM_WIKI_VAULT || process.env.LLM_WIKI_TEST_VAULT || "/tmp/test-vault-llm-wiki";
 const SESSIONS_DIR = path.join(TEST_VAULT, "raw/sessions/test-project");
 const WIKI_DIR = path.join(TEST_VAULT, "wiki");
 
 // We must set the env var BEFORE importing modules that read config
-process.env.LLM_WIKI_TEST_VAULT = TEST_VAULT;
+process.env.LLM_WIKI_VAULT = TEST_VAULT;
 // Rest API calls will fail in test — that's fine, ingest falls back to fs
 
 // Create a minimal ExtendedContext for testing
