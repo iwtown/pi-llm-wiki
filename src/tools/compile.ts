@@ -12,6 +12,7 @@ import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { readFile, writeFile, appendToFile } from "../client";
 import { markCompiled, getField } from "../manifest";
 import { PATHS, WIKI_TYPES, LLM_CONFIG, LLM_FALLBACK_CONFIG } from "../config";
+import { appendToDirIndex } from "../system/rebuild-indexes";
 import { logChange } from "../system/changes";
 import { detectProject } from "../project";
 import { collectWikiPages, detectKnowledgeUpgrade, textSimilarity } from "../system/analyzer";
@@ -502,7 +503,7 @@ ${body.slice(0, sliceLen)}
 严格按照以下格式输出，不要添加额外说明：
 
 标题: <10字以内的中文标题，概括核心知识贡献>
-摘要: <一句话总结可复用知识>
+摘要: <60字以内，用于导航列表展示，需让人一眼判断是否相关>
 
 决策:
 - <具体决策内容，附上原因>
@@ -538,7 +539,7 @@ ${body.slice(0, sliceLen)}
 严格按照以下格式输出，不要添加额外说明：
 
 标题: <10字以内的中文标题，概括本次会话的核心知识贡献>
-摘要: <一句话总结本次会话产生的可复用知识>
+摘要: <60字以内，用于导航列表展示，需让人一眼判断是否相关>
 
 决策:
 - <技术选型/配置变更/工具选择，附上原因>
@@ -570,13 +571,32 @@ ${body.slice(0, sliceLen)}
 **标签**：3-5个中文关键词，从具体到抽象排序。例如：Pi Agent, monorepo, 项目管理, 架构设计`;
 }
 
-/**
- * Try structured extraction via primary provider → optional fallback → null.
- * Accepts optional fetchFn for testability and optional retryCfg for testing.
- */
+/** Scoring: higher = better. Threshold ~4 for "acceptable" quality. */
+function scoreOutput(s: StructuredSections): number {
+  let score = 0;
+  if (s.summary && s.summary.length >= 10) score += 3;
+  else if (s.summary && s.summary.length >= 5) score += 1;
+  score += Math.min(s.insights.length, 5);
+  score += Math.min(s.decisions.length, 3);
+  score += Math.min(s.tags?.length ?? 0, 2);
+  if (s.summary && /^(提炼关键知识|暂无|[这那]次?[会话对话记录])/.test(s.summary)) score -= 2;
+  return score;
+}
+
+/** Try fallback LLM provider (DeepSeek). Returns raw string or null. */
+async function tryFallbackProvider(
+  body: string, prompt: string, temperature: number,
+  fetchFn: typeof globalThis.fetch, retryCfg?: any
+): Promise<string | null> {
+  const fbKey = process.env[LLM_FALLBACK_CONFIG.keyVar];
+  if (!LLM_FALLBACK_CONFIG.model || !LLM_FALLBACK_CONFIG.endpoint || !fbKey) return null;
+  dlog(`Trying fallback: ${LLM_FALLBACK_CONFIG.model}`);
+  return llmSemaphore.run(() => callProvider(body, LLM_FALLBACK_CONFIG, fbKey, prompt, fetchFn, retryCfg, temperature));
+}
+
 /**
  * Try LLM extraction for raw/unstructured sessions (Path B).
- * Uses old-style extract prompt but outputs the unified format.
+ * Quality-aware: if primary output is too generic, tries fallback.
  */
 async function tryExtract(
   body: string,
@@ -585,30 +605,23 @@ async function tryExtract(
 ): Promise<StructuredSections | null> {
   const apiKey = process.env[LLM_CONFIG.keyVar];
   if (!apiKey) return null;
-
   const prompt = buildPrompt(body);
 
-  // Primary provider (with concurrency throttle)
   const raw = await llmSemaphore.run(() => callProvider(body, LLM_CONFIG, apiKey, prompt, fetchFn, retryCfg, LLM_CONFIG.temperature));
-  if (raw) {
-    const parsed = parseDistillOutput(raw);
-    if (parsed) return parsed;
-    // Unparseable → wrap as goal
-    return { goal: raw.slice(0, 500), decisions: [], insights: [], issues: [] };
-  }
+  const parsed = raw ? parseDistillOutput(raw) : null;
 
-  // Fallback provider (DeepSeek official API)
-  const fallbackKey = process.env[LLM_FALLBACK_CONFIG.keyVar];
-  if (LLM_FALLBACK_CONFIG.model && LLM_FALLBACK_CONFIG.endpoint && fallbackKey) {
-    dlog(`Primary extraction failed, trying fallback: ${LLM_FALLBACK_CONFIG.model}`);
-    const raw2 = await llmSemaphore.run(() => callProvider(body, LLM_FALLBACK_CONFIG, fallbackKey, prompt, fetchFn, retryCfg, LLM_CONFIG.temperature));
+  // Try fallback if primary failed, unparseable, or low quality (generic output)
+  if (!parsed || scoreOutput(parsed) < 4) {
+    const raw2 = await tryFallbackProvider(body, prompt, LLM_CONFIG.temperature, fetchFn, retryCfg);
     if (raw2) {
-      const parsed = parseDistillOutput(raw2);
-      if (parsed) return parsed;
-      return { goal: raw2.slice(0, 500), decisions: [], insights: [], issues: [] };
+      const parsed2 = parseDistillOutput(raw2);
+      if (parsed2 && (!parsed || scoreOutput(parsed2) > scoreOutput(parsed))) return parsed2;
+      if (!parsed) return { goal: raw2.slice(0, 500), decisions: [], insights: [], issues: [] };
     }
   }
 
+  if (parsed) return parsed;
+  if (raw) return { goal: raw.slice(0, 500), decisions: [], insights: [], issues: [] };
   return null;
 }
 
@@ -624,30 +637,22 @@ async function tryDistill(
 ): Promise<StructuredSections | null> {
   const apiKey = process.env[LLM_CONFIG.keyVar];
   if (!apiKey) return null;
-
   const prompt = buildDistillPrompt(body);
 
-  // Primary provider with higher temperature for creative distillation (concurrency throttled)
   const raw = await llmSemaphore.run(() => callProvider(body, LLM_CONFIG, apiKey, prompt, fetchFn, retryCfg, LLM_CONFIG.distillTemperature));
-  if (raw) {
-    const parsed = parseDistillOutput(raw);
-    if (parsed) return parsed;
-    // Unparseable → wrap whole output as one insight
-    return { goal: "", decisions: [], insights: [raw.slice(0, 300)], issues: [] };
-  }
+  const parsed = raw ? parseDistillOutput(raw) : null;
 
-  // Fallback provider (DeepSeek official API)
-  const fallbackKey = process.env[LLM_FALLBACK_CONFIG.keyVar];
-  if (LLM_FALLBACK_CONFIG.model && LLM_FALLBACK_CONFIG.endpoint && fallbackKey) {
-    dlog(`Primary distillation failed, trying fallback: ${LLM_FALLBACK_CONFIG.model}`);
-    const raw2 = await llmSemaphore.run(() => callProvider(body, LLM_FALLBACK_CONFIG, fallbackKey, prompt, fetchFn, retryCfg, LLM_CONFIG.distillTemperature));
+  if (!parsed || scoreOutput(parsed) < 4) {
+    const raw2 = await tryFallbackProvider(body, prompt, LLM_CONFIG.distillTemperature, fetchFn, retryCfg);
     if (raw2) {
-      const parsed = parseDistillOutput(raw2);
-      if (parsed) return parsed;
-      return { goal: "", decisions: [], insights: [raw2.slice(0, 300)], issues: [] };
+      const parsed2 = parseDistillOutput(raw2);
+      if (parsed2 && (!parsed || scoreOutput(parsed2) > scoreOutput(parsed))) return parsed2;
+      if (!parsed) return { goal: "", decisions: [], insights: [raw2.slice(0, 300)], issues: [] };
     }
   }
 
+  if (parsed) return parsed;
+  if (raw) return { goal: "", decisions: [], insights: [raw.slice(0, 300)], issues: [] };
   return null;
 }
 
@@ -894,6 +899,15 @@ export async function compile(
     confidence = 2;
   }
 
+  // Fallback summary: when LLM didn't produce one, use first sentence from wiki body
+  // This ensures every page has a navigation description for index.md display
+  if (!extractedSummary && wikiContent && wikiContent.length > 10) {
+    const firstLine = wikiContent.replace(/^# .+\n{1,2}/, "").match(/^.{10,120}?[。\n]/);
+    if (firstLine) {
+      extractedSummary = firstLine[0].replace(/[\n\r]/g, "").slice(0, 120);
+    }
+  }
+
   // Build tags frontmatter — use LLM-generated tags, or auto-extract from observations
   const wikiTag = `wiki/${wikiDir}`;
   let allTags: string[];
@@ -970,6 +984,9 @@ ${linkLines || "暂无关联"}
 `;
 
   await writeFile(wikiPath, wikiContent);
+
+  // Update directory index for progressive disclosure
+  appendToDirIndex(wikiPath);
 
   // Mark raw session as compiled
   await markCompiled(rawPath, { compiledTo: wikiPath, linkedTo: links });

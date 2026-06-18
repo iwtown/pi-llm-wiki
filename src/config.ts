@@ -96,7 +96,7 @@ export const LLM_FALLBACK_CONFIG = {
   /** Fallback model — set via LLM_WIKI_FALLBACK_MODEL */
   model: process.env.LLM_WIKI_FALLBACK_MODEL || "deepseek-v4-flash",
   /** Fallback endpoint — set via LLM_WIKI_FALLBACK_ENDPOINT */
-  endpoint: process.env.LLM_WIKI_FALLBACK_ENDPOINT || "https://api.deepseek.com/v1/chat/completions",
+  endpoint: process.env.LLM_WIKI_FALLBACK_ENDPOINT || "https://api.deepseek.com/chat/completions",
   /** Environment variable name for fallback API key */
   keyVar: "DEEPSEEK_API_KEY",
   /** Timeout (ms) — override via LLM_WIKI_FALLBACK_TIMEOUT_MS */

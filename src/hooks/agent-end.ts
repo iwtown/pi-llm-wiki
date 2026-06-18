@@ -2,12 +2,16 @@
  * pi-llm-wiki — agent_end hook.
  * Auto-ingests the session when agent_end fires (safety net if obs_ingest wasn't called).
  * Integrates with pi-observational-memory to extract observations for meaningful auto-ingest.
+ *
+ * After each session's ingest → compile → weave, also batch-compiles any pending
+ * raw sessions (exit-time backlog cleanup, no threshold).
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { ingest, ingestedSessionIds } from "../tools/ingest";
 import { compile } from "../tools/compile";
 import { weave } from "../tools/weave";
+import { batchCompilePending } from "../system/refresh";
 import { detectProject } from "../project";
 import { LLM_WIKI } from "../config";
 import { fileDlog, slog } from "../system/log";
@@ -312,8 +316,19 @@ export async function autoIngest(pi: ExtensionAPI): Promise<void> {
             if (cr?.wikiPath && cr.linkedTo?.length) {
               await weave(ingestResult.path, cr.wikiPath, cr.linkedTo, cr.insights, ctx);
             }
+            // Also batch-compile any other pending sessions (exit-time backlog cleanup)
+            await batchCompilePending(ctx);
           } catch (e: any) {
             slog("pipeline_error", { path: ingestResult.path, error: e.message });
+          }
+        });
+      } else if (ingestResult.path) {
+        // Session was ingested but skipped compile (e.g., deduped) — still clean up backlog
+        setImmediate(async () => {
+          try {
+            await batchCompilePending(ctx);
+          } catch (e: any) {
+            slog("pipeline_error", { path: "batch", error: e.message });
           }
         });
       }

@@ -22,6 +22,7 @@ import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { scoreContent } from "../tools/ingest";
 import { dlog } from "./log";
 import { assessAllQuality } from "../tools/quality";
+import { rebuildAllIndexes, rebuildRootIndex } from "./rebuild-indexes";
 
 const VAULT = LLM_WIKI.vault;
 
@@ -486,6 +487,32 @@ function runAutoLint(): void {
   }
 }
 
+// ── Exported: batch-compile pending sessions (no threshold, used by agent-end on exit) ──
+
+export async function batchCompilePending(ctx?: ExtensionContext): Promise<void> {
+  const pending = scanPendingSessions();
+  if (pending.length === 0) return;
+  const c = ctx ?? ({ cwd: process.cwd() } as ExtensionContext);
+  for (const rawPath of pending.slice(0, BATCH_SIZE)) {
+    try {
+      const fullPath = path.join(VAULT, rawPath);
+      if (fs.existsSync(fullPath)) {
+        const rawContent = fs.readFileSync(fullPath, "utf-8");
+        const rawFm = parseFrontmatter(rawContent);
+        if (rawFm.trivial === true || rawFm.trivial === "true" || rawFm.skipped === "trivial") {
+          const updated = updateFrontmatter(rawContent, { compiled: true, status: "skipped" });
+          fs.writeFileSync(fullPath, updated, "utf-8");
+          continue;
+        }
+      }
+      const result = await compileSession(rawPath, {}, c);
+      if (result?.wikiPath) {
+        dlog("batch-cleanup: " + rawPath + " → " + result.wikiPath);
+      }
+    } catch (e: any) { dlog("batch-cleanup error for " + rawPath + ": " + (e?.message ?? e)); }
+  }
+}
+
 // ── Hook registration ──
 
 export function refreshSystemPages(pi: ExtensionAPI): void {
@@ -543,6 +570,9 @@ export function refreshSystemPages(pi: ExtensionAPI): void {
 
       // Step 3: Auto-lint (always, to keep log.md up-to-date)
       runAutoLint();
+
+      // Step 3b: Rebuild index.md files (parallel async, ~200ms → ~50ms)
+      await Promise.all([rebuildAllIndexes(), rebuildRootIndex()]);
 
       // Step 4: Regenerate status page
       writeSystemPage("wiki/状态.md", generateStatus());

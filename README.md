@@ -123,8 +123,8 @@ pi-llm-wiki/
 │   ├── client.ts         ← 文件系统抽象层
 │   ├── config.ts         ← 单一配置真相源
 │   └── manifest.ts       ← 管线状态管理
-├── scripts/              ← 管线调试脚本
-├── tests/                ← 测试（40+，含单元 + 集成 + 钩子）
+├── scripts/              ← run-pipeline.ts（手动批量编译）
+├── tests/                ← 测试（50+，含单元 + 集成 + 索引）
 └── package.json          ← pi 清单
 ```
 
