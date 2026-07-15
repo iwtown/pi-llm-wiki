@@ -300,6 +300,23 @@ export async function autoIngest(pi: ExtensionAPI): Promise<void> {
         return;
       }
 
+      // ── Hard intake gate: reject Tier 2 with no extracted decisions/insights ──
+      // Tier 1 (OM-based) always passes. Tier 2 needs substantive content.
+      if (tier === "tier2-extract") {
+        const hasCriticalObs = obs.some((o) => o.relevance === "critical" || o.relevance === "high");
+        const hasReflections = refs.length > 0;
+        if (!hasCriticalObs && !hasReflections) {
+          // Check the built summary for decision/insight content
+          const hasDecisionSection = /### ⚖️ 决策\n/.test(summary);
+          const hasInsightSection = /### 💡 洞察\n/.test(summary);
+          if (!hasDecisionSection && !hasInsightSection) {
+            slog("auto_ingest_skip", { sessionId, reason: "tier2_empty", tier });
+            fileDlog(`hard gate skip: tier2 with no extracted decisions/insights`);
+            return;
+          }
+        }
+      }
+
       fileDlog(`calling ingest, summary length=${summary.length}, ctx.cwd=${ctx.cwd}`);
       const ingestResult = await ingest(summary, { ...ctx, parentSessionId } as ExtendedContext);
       markIngested(pi);

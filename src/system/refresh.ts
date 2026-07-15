@@ -174,7 +174,7 @@ async function autoCompile(): Promise<{ wikiPaths: string[]; rawPaths: string[] 
 
   for (const rawPath of batch) {
     try {
-      // Phase 4: Skip trivial sessions (score < 30 or marked trivial)
+      // Phase 4: Skip trivial sessions (score < 45 or marked trivial)
       const rawFullPath = path.join(VAULT, rawPath);
       if (fs.existsSync(rawFullPath)) {
         const rawContent = fs.readFileSync(rawFullPath, "utf-8");

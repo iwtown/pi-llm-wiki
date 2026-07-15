@@ -379,12 +379,12 @@ describe("scoreContent", () => {
     assert.equal(result.isTrivial, false);
   });
 
-  it("scores long content without sections as moderate (>30)", () => {
+  it("scores long content without sections as trivial (score < 45)", () => {
     const body = "x".repeat(2500);
     const content = ["## Test", "", body].join("\n");
     const result = scoreContent(content);
-    assert.ok(result.score >= 30, "Expected moderate score for long content, got " + result.score);
-    assert.equal(result.isTrivial, false);
+    assert.ok(result.score >= 30, "Expected some score for long content, got " + result.score);
+    assert.equal(result.isTrivial, true, "Raw length alone is now trivial at threshold 45");
   });
 
   it("marks short empty content as trivial (<30)", () => {

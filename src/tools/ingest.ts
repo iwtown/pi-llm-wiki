@@ -92,7 +92,7 @@ export function scoreContent(content: string): SessionScore {
 
   return {
     score: Math.min(100, score),
-    isTrivial: score < 30,
+    isTrivial: score < 45,
     factors: { hasGoal, hasDecisions, hasInsights, hasIssues, totalChars, sectionCount },
   };
 }
