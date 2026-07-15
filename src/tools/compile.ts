@@ -983,6 +983,25 @@ ${linkLines || "暂无关联"}
 > 编译自 [[${rawPath}]]
 `;
 
+  // P1: Quality gate — skip low-quality pages before writing
+  // Catches: auto-generated session-ID titles, empty chapters, raw dumps with no knowledge
+  // Match pattern: YYYY-MM-DD or YYYY:MM:DD with optional time component (auto-session pattern)
+  const isSessionIdTitle = /^\d{4}[-:]\d{2}[-:]\d{2}[T\s]/i.test(finalTitle);
+  const isLowConfidenceRaw = (compiledBy === "raw-copy" || compiledBy === "direct-copy") &&
+    confidence <= 2 && insightLines.length === 0;
+  if (isSessionIdTitle || isLowConfidenceRaw) {
+    dlog(`Skipping write: low-quality compile (title=${finalTitle}, confidence=${confidence}, compiledBy=${compiledBy})`);
+    await markCompiled(rawPath, { skipped: "low-quality" });
+    return {
+      rawPath,
+      wikiPath: "",
+      wikiType,
+      linkedTo: links,
+      insights: [],
+      dedupSuggestion: "⏭️ 跳过低质编译（无有效知识章节）",
+    } as CompileResult;
+  }
+
   await writeFile(wikiPath, wikiContent);
 
   // Update directory index for progressive disclosure

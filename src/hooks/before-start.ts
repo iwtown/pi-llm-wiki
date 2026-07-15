@@ -134,7 +134,20 @@ function buildKnowledgePreview(cwd: string): string {
   const restLinks = top.slice(1).map((p) => `[[${p.path}]]`).join(" · ");
   const restLine = restLinks ? `${restLinks}\n` : "";
 
-  return `\n📚 当前相关:\n${topLine}${restLine}\n---\n`;
+  // P2: Check lint staleness -- if lint log is >=14 days old, nudge user
+  let lintNote = "";
+  try {
+    const logPath = path.join(vaultDir, PATHS.log);
+    if (fs.existsSync(logPath)) {
+      const mtime = fs.statSync(logPath).mtimeMs;
+      const daysSince = (Date.now() - mtime) / 86400000;
+      if (daysSince > 14) {
+        lintNote = `⚠️ wiki 上次体检已超过 ${Math.floor(daysSince)} 天，建议运行 /wiki-lint\n`;
+      }
+    }
+  } catch { /* non-fatal */ }
+
+  return `\n📚 当前相关:\n${topLine}${restLine}${lintNote}\n---\n`;
 }
 
 // ─── Pipeline backlog check (warning-only, no auto-trigger) ───
