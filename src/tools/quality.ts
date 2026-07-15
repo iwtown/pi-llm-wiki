@@ -189,6 +189,7 @@ export interface ProjectIndexEntry {
   path: string;
   title: string;
   quality_score: number;
+  created?: string; // YYYY-MM-DD, from frontmatter, for temporal ranking
 }
 
 export interface ProjectIndex {
@@ -221,12 +222,20 @@ export function buildProjectIndex(pages: WikiPage[]): void {
     // or sessions where project detection failed.
     if (proj.startsWith("_home") || skipProjects.has(proj)) continue;
     if (!projects[proj]) projects[proj] = [];
-    projects[proj].push({ path: page.path, title, quality_score: qs });
+    const created = typeof fm.created === "string" ? fm.created : undefined;
+    projects[proj].push({ path: page.path, title, quality_score: qs, created });
   }
 
-  // Sort each project's pages by quality_score descending
+  // Sort each project's pages by weighted score (quality + recency)
+  // Temporal boost: new pages get up to +2, decaying linearly over 90 days
   for (const proj of Object.keys(projects)) {
-    projects[proj].sort((a, b) => b.quality_score - a.quality_score);
+    projects[proj].sort((a, b) => {
+      const aAge = a.created ? Math.min(90, daysSince(a.created)) : 90;
+      const bAge = b.created ? Math.min(90, daysSince(b.created)) : 90;
+      const aWeight = a.quality_score + 2 * (1 - aAge / 90);
+      const bWeight = b.quality_score + 2 * (1 - bAge / 90);
+      return bWeight - aWeight;
+    });
   }
 
   const index: ProjectIndex = {

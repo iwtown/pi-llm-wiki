@@ -45,6 +45,17 @@ export async function injectSchema(pi: ExtensionAPI): Promise<void> {
 
 /** Build the system prompt prefix: schema rules + optional knowledge preview */
 function buildSystemPromptPrefix(schema: string, cwd?: string): string {
+  // Schema freshness check: warn if schema.md is >30 days stale
+  try {
+    const schemaFm = parseFrontmatter(schema);
+    if (schemaFm.updated && typeof schemaFm.updated === "string") {
+      const days = Math.floor((Date.now() - new Date(schemaFm.updated + "T00:00:00").getTime()) / 86400000);
+      if (days > 30) {
+        slog("schema_stale", { days, updated: schemaFm.updated });
+      }
+    }
+  } catch { /* non-fatal */ }
+
   const schemaBlock = `\n\n---\n# LLM-Wiki 知识库规则\n\n${schema}\n\n---\n`;
 
   // If no cwd available, skip knowledge preview
@@ -103,11 +114,25 @@ function buildKnowledgePreview(cwd: string): string {
   const projects = readProjectIndex();
   if (!projects) return "";
 
-  const matched = projects[projectName];
-  if (!matched || matched.length === 0) return "";
+  const matched = projects[projectName] || [];
+
+  // Build a cross-project fallback pool (skip current project + noise)
+  const skipProj = new Set([projectName, "_home_wtown_", "home", "wtown", "unknown"]);
+  const pool: typeof matched = [];
+  for (const [proj, pages] of Object.entries(projects)) {
+    if (skipProj.has(proj)) continue;
+    pool.push(...pages);
+  }
+  pool.sort((a, b) => b.quality_score - a.quality_score);
+
+  // Use current project pages first, pad with cross-project fallback up to 3
+  const top = matched.length >= 3
+    ? matched.slice(0, 3)
+    : [...matched, ...pool.slice(0, 3 - matched.length)];
+
+  if (top.length === 0) return "";
 
   const vaultDir = LLM_WIKI.vault;
-  const top = matched.slice(0, 3);
 
   // Build rich entry for top-1: read its content inline
   let topLine = "";
