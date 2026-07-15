@@ -192,20 +192,20 @@ import { buildTier2Summary } from "../src/hooks/agent-end";
 
 describe("buildTier2Summary", () => {
   it("uses first message as goal", () => {
-    const result = buildTier2Summary(["调研 WezTerm 配置", "用方案 A"], "2026-06-12");
-    assert.ok(result.includes("调研 WezTerm 配置"), "first msg as goal");
-    assert.ok(result.includes("方案 A"), "second msg as decision");
+    const { summary } = buildTier2Summary(["调研 WezTerm 配置", "用方案 A"], "2026-06-12");
+    assert.ok(summary.includes("调研 WezTerm 配置"), "first msg as goal");
+    assert.ok(summary.includes("方案 A"), "second msg as decision");
   });
 
   it("handles single message", () => {
-    const result = buildTier2Summary(["简单问题"], "2026-06-12");
-    assert.ok(result.includes("简单问题"), "single msg as goal");
+    const { summary } = buildTier2Summary(["简单问题"], "2026-06-12");
+    assert.ok(summary.includes("简单问题"), "single msg as goal");
   });
 
   it("includes activity log for multiple messages", () => {
     const msgs = ["任务一", "任务二", "任务三", "任务四", "任务五", "任务六"];
-    const result = buildTier2Summary(msgs, "2026-06-12");
-    assert.ok(result.includes("6 条消息"), "activity log count");
+    const { summary } = buildTier2Summary(msgs, "2026-06-12");
+    assert.ok(summary.includes("6 条消息"), "activity log count");
   });
 });
 

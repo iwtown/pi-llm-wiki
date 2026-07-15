@@ -199,33 +199,33 @@ export function buildTier2Summary(userMessages: string[], date: string): string 
     lines.push(...activities, "");
   }
 
-  return lines.join("\n");
+  return { summary: lines.join("\n"), hasDecisions: decisions.length > 0, hasInsights: insights.length > 0 };
 }
 
 /** Unified summarizer: Tier 1 (OM + user msgs) → Tier 2 (extract) → skip */
 export function buildUnifiedSummary(
   entries: any[],
   omData: { obs: OmObservation[]; refs: OmReflection[] }
-): { summary: string | null; tier: string } {
+): { summary: string | null; tier: string; hasDecisions: boolean; hasInsights: boolean } {
   const userMessages = extractUserMessages(entries);
-  if (userMessages.length === 0) return { summary: null, tier: "no-data" };
+  if (userMessages.length === 0) return { summary: null, tier: "no-data", hasDecisions: false, hasInsights: false };
 
   const date = new Date().toISOString().split("T")[0];
 
   // Tier 1: High-value OM data available — use it
   const highValueObs = omData.obs.filter((o) => o.relevance === "critical" || o.relevance === "high");
   if (highValueObs.length > 0 || omData.refs.length > 0) {
-    return { summary: buildTier1Summary(omData.obs, omData.refs, userMessages, date), tier: "tier1-om" };
+    return { summary: buildTier1Summary(omData.obs, omData.refs, userMessages, date), tier: "tier1-om", hasDecisions: true, hasInsights: true };
   }
 
   // Tier 2: OM data too shallow (only medium/low) or none — extract from user messages
-  // User message extraction often produces better results than shallow OM observations
   if (userMessages.length >= 2) {
-    return { summary: buildTier2Summary(userMessages, date), tier: "tier2-extract" };
+    const { summary, hasDecisions, hasInsights } = buildTier2Summary(userMessages, date);
+    return { summary, tier: "tier2-extract", hasDecisions, hasInsights };
   }
 
-  // Tier 3: Trivial — skip (ingest.ts scoreContent will also filter)
-  return { summary: null, tier: "skip-trivial" };
+  // Tier 3: Trivial — skip
+  return { summary: null, tier: "skip-trivial", hasDecisions: false, hasInsights: false };
 }
 
 export async function autoIngest(pi: ExtensionAPI): Promise<void> {
@@ -292,7 +292,7 @@ export async function autoIngest(pi: ExtensionAPI): Promise<void> {
       }
 
       // Build summary (Tier 1: OM → Tier 2: extract → Tier 3: skip)
-      const { summary, tier } = buildUnifiedSummary(entries, { obs, refs });
+      const { summary, tier, hasDecisions, hasInsights } = buildUnifiedSummary(entries, { obs, refs });
       fileDlog(`summary tier: ${tier}`);
 
       if (!summary) {
@@ -300,21 +300,12 @@ export async function autoIngest(pi: ExtensionAPI): Promise<void> {
         return;
       }
 
-      // ── Hard intake gate: reject Tier 2 with no extracted decisions/insights ──
-      // Tier 1 (OM-based) always passes. Tier 2 needs substantive content.
-      if (tier === "tier2-extract") {
-        const hasCriticalObs = obs.some((o) => o.relevance === "critical" || o.relevance === "high");
-        const hasReflections = refs.length > 0;
-        if (!hasCriticalObs && !hasReflections) {
-          // Check the built summary for decision/insight content
-          const hasDecisionSection = /### ⚖️ 决策\n/.test(summary);
-          const hasInsightSection = /### 💡 洞察\n/.test(summary);
-          if (!hasDecisionSection && !hasInsightSection) {
-            slog("auto_ingest_skip", { sessionId, reason: "tier2_empty", tier });
-            fileDlog(`hard gate skip: tier2 with no extracted decisions/insights`);
-            return;
-          }
-        }
+      // ── Hard intake gate: reject Tier 2 with no extracted content ──
+      // Tier 1 (OM-based) always passes. Tier 2 needs decisions or insights.
+      if (tier === "tier2-extract" && !hasDecisions && !hasInsights) {
+        slog("auto_ingest_skip", { sessionId, reason: "tier2_empty", tier });
+        fileDlog(`hard gate skip: tier2 with no extracted decisions/insights`);
+        return;
       }
 
       fileDlog(`calling ingest, summary length=${summary.length}, ctx.cwd=${ctx.cwd}`);
