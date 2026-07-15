@@ -190,6 +190,7 @@ export interface ProjectIndexEntry {
   title: string;
   quality_score: number;
   created?: string; // YYYY-MM-DD, from frontmatter, for temporal ranking
+  decay?: number;   // passive quality decay for never-queried pages (0 / 0.5 / 1.0)
 }
 
 export interface ProjectIndex {
@@ -223,17 +224,23 @@ export function buildProjectIndex(pages: WikiPage[]): void {
     if (proj.startsWith("_home") || skipProjects.has(proj)) continue;
     if (!projects[proj]) projects[proj] = [];
     const created = typeof fm.created === "string" ? fm.created : undefined;
-    projects[proj].push({ path: page.path, title, quality_score: qs, created });
+    const queriedCount = typeof fm.queried_count === "number" ? fm.queried_count : 0;
+    // Passive decay: old, never-queried pages lose effective score
+    // >90d stale and untouched → -1.0, >60d → -0.5
+    const decay =
+      created && queriedCount === 0
+        ? daysSince(created) > 90 ? 1.0 : daysSince(created) > 60 ? 0.5 : 0
+        : 0;
+    projects[proj].push({ path: page.path, title, quality_score: qs, created, decay });
   }
 
   // Sort each project's pages by weighted score (quality + recency)
-  // Temporal boost: new pages get up to +2, decaying linearly over 90 days
   for (const proj of Object.keys(projects)) {
     projects[proj].sort((a, b) => {
       const aAge = a.created ? Math.min(90, daysSince(a.created)) : 90;
       const bAge = b.created ? Math.min(90, daysSince(b.created)) : 90;
-      const aWeight = a.quality_score + 2 * (1 - aAge / 90);
-      const bWeight = b.quality_score + 2 * (1 - bAge / 90);
+      const aWeight = a.quality_score + 2 * (1 - aAge / 90) - (a.decay || 0);
+      const bWeight = b.quality_score + 2 * (1 - bAge / 90) - (b.decay || 0);
       return bWeight - aWeight;
     });
   }

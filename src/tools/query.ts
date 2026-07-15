@@ -42,15 +42,35 @@ export function parseAtlasLinks(content: string): Array<{ path: string; descript
   return links;
 }
 
+/** Lightweight alias normalization for matchScore */
+const CANONICAL: Record<string, string> = {
+  config: "configuration", 设置: "configuration", 配置: "configuration",
+  skill: "ability", skills: "ability", 能力: "ability", 能力包: "ability",
+  ingests: "ingest", 编译: "ingest", 写入: "ingest",
+  query: "search", 查询: "search", 搜索: "search", 搜: "search",
+  agent: "agent", 助手: "agent",
+  extension: "extension", 扩展: "extension", extensions: "extension",
+};
+
 /** Score how well a query matches a string (simple case-insensitive word overlap) */
 export function matchScore(query: string, text: string): number {
   const qLower = query.toLowerCase();
   const tLower = text.toLowerCase();
+  // Alias normalization: map synonyms to canonical forms for better matching
+  const norm = (s: string) => {
+    let out = s;
+    for (const [k, v] of Object.entries(CANONICAL)) {
+      out = out.replaceAll(k, v);
+    }
+    return out;
+  };
+  const qNorm = norm(qLower);
+  const tNorm = norm(tLower);
   // Exact substring match = highest
-  if (tLower.includes(qLower)) return 1;
+  if (tNorm.includes(qNorm)) return 1;
   // Word overlap
-  const qWords = qLower.split(/\s+/);
-  const tWords = new Set(tLower.split(/\s+/));
+  const qWords = qNorm.split(/\s+/);
+  const tWords = new Set(tNorm.split(/\s+/));
   let hits = 0;
   for (const w of qWords) {
     if (w.length < 2) continue;
